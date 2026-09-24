@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import sqlite3
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -429,10 +431,6 @@ class LearnWithAIServerTests(unittest.TestCase):
     def test_automatic_transcription_is_queued_and_mocked(self) -> None:
         admin_token = self.login("admin@learnwithai.demo")
         _, lesson = self.course_with_lesson(admin_token)
-        status, _, data = self.request(
-            "PUT", "/api/session/gemini-key", {"api_key": "test-gemini-key-automatic-123"}, token=admin_token
-        )
-        self.assertEqual(status, 200, data)
         content_type, body = self.multipart_body(
             {"transcription_mode": "auto"},
             {"video": ("automatic.webm", "video/webm", b"webm-video-content")},
@@ -448,22 +446,113 @@ class LearnWithAIServerTests(unittest.TestCase):
         self.assertEqual(status, 201, data)
         queued = data["lesson"]
         self.assertEqual(queued["transcription_status"], "queued")
-        self.assertEqual(queued["transcript_source"], "generated")
+        self.assertEqual(queued["transcript_source"], "whisper")
         self.assertIn("review", queued["transcript_notice"].lower())
         start_job.assert_called_once()
 
-        token_hash = self.httpd.app._token_hash_from_authorization(f"Bearer {admin_token}")
         with self.httpd.app.connect() as db:
-            row = db.execute("SELECT video_storage_name, video_mime_type FROM lessons WHERE id = ?", (lesson["id"],)).fetchone()
-            generated_storage_name, generated_mime_type = row["video_storage_name"], row["video_mime_type"]
-        with mock.patch.object(self.httpd.app, "_gemini_transcribe_video", return_value="[00:00] Welcome to the lesson."):
-            self.httpd.app._run_transcription_job(lesson["id"], generated_storage_name, generated_mime_type, token_hash)
+            row = db.execute("SELECT video_storage_name FROM lessons WHERE id = ?", (lesson["id"],)).fetchone()
+            storage_name = row["video_storage_name"]
+        with mock.patch.object(self.httpd.app, "_whisper_transcribe_video", return_value="[00:00 - 00:03] Welcome to the lesson."):
+            self.httpd.app._run_transcription_job(lesson["id"], storage_name)
         status, _, data = self.request("GET", f"/api/lessons/{lesson['id']}", token=admin_token)
         self.assertEqual(status, 200, data)
         self.assertEqual(data["lesson"]["transcription_status"], "ready")
-        self.assertEqual(data["lesson"]["transcript_source"], "generated")
-        self.assertEqual(data["lesson"]["transcript"], "[00:00] Welcome to the lesson.")
+        self.assertEqual(data["lesson"]["transcript_source"], "whisper")
+        self.assertEqual(data["lesson"]["transcript"], "[00:00 - 00:03] Welcome to the lesson.")
         self.assertIn("not a verbatim", data["lesson"]["transcript_notice"])
+
+    def test_whisper_engine_is_lazy_cached_and_preserves_segment_timestamps(self) -> None:
+        class Segment:
+            def __init__(self, start: float, end: float, text: str) -> None:
+                self.start = start
+                self.end = end
+                self.text = text
+
+        fake_model = mock.Mock()
+        fake_model.transcribe.return_value = (
+            [Segment(0.4, 2.9, " Welcome to the lesson. "), Segment(65.2, 67.8, " Practise one step at a time.")],
+            object(),
+        )
+        factory = mock.Mock(return_value=fake_model)
+        fake_module = types.SimpleNamespace(WhisperModel=factory)
+        app = self.httpd.app
+        with app._whisper_model_lock:
+            app._whisper_model = None
+            app._whisper_model_config = None
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "LEARNWITHAI_WHISPER_MODEL": "base",
+                    "LEARNWITHAI_WHISPER_DEVICE": "cpu",
+                    "LEARNWITHAI_WHISPER_COMPUTE_TYPE": "int8",
+                },
+            ),
+            mock.patch.object(server.importlib, "import_module", return_value=fake_module) as import_module,
+        ):
+            first = app._whisper_transcribe_video(Path("lesson.webm"))
+            second = app._whisper_transcribe_video(Path("lesson.webm"))
+        self.assertEqual(first, "[00:00 - 00:02] Welcome to the lesson.\n[01:05 - 01:07] Practise one step at a time.")
+        self.assertEqual(second, first)
+        factory.assert_called_once_with("base", device="cpu", compute_type="int8")
+        self.assertEqual(import_module.call_count, 1)
+        self.assertEqual(fake_model.transcribe.call_count, 2)
+        fake_model.transcribe.assert_called_with("lesson.webm", beam_size=5, vad_filter=True)
+
+    def test_whisper_model_load_failure_is_actionable_without_leaking_runtime_details(self) -> None:
+        app = self.httpd.app
+        with app._whisper_model_lock:
+            app._whisper_model = None
+            app._whisper_model_config = None
+        factory = mock.Mock(side_effect=RuntimeError(r"C:\private-model-cache\missing.bin"))
+        fake_module = types.SimpleNamespace(WhisperModel=factory)
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "LEARNWITHAI_WHISPER_MODEL": "base",
+                    "LEARNWITHAI_WHISPER_DEVICE": "cpu",
+                    "LEARNWITHAI_WHISPER_COMPUTE_TYPE": "int8",
+                },
+            ),
+            mock.patch.object(server.importlib, "import_module", return_value=fake_module),
+            self.assertRaises(server.WhisperTranscriptionError) as raised,
+        ):
+            app._get_whisper_model()
+        self.assertIn("could not be loaded", raised.exception.public_message)
+        self.assertNotIn("private-model-cache", raised.exception.public_message)
+
+    def test_auto_transcription_surfaces_missing_whisper_runtime_safely(self) -> None:
+        admin_token = self.login("admin@learnwithai.demo")
+        _, lesson = self.course_with_lesson(admin_token)
+        content_type, body = self.multipart_body(
+            {"transcription_mode": "auto"},
+            {"video": ("needs-whisper.mp4", "video/mp4", b"not-a-real-video")},
+        )
+        with mock.patch.object(self.httpd.app, "_start_transcription_job"):
+            status, _, data = self.request(
+                "POST",
+                f"/api/lessons/{lesson['id']}/video",
+                token=admin_token,
+                headers={"Content-Type": content_type},
+                raw_body=body,
+            )
+        self.assertEqual(status, 201, data)
+        with self.httpd.app.connect() as db:
+            row = db.execute("SELECT video_storage_name FROM lessons WHERE id = ?", (lesson["id"],)).fetchone()
+            storage_name = row["video_storage_name"]
+        with self.httpd.app._whisper_model_lock:
+            self.httpd.app._whisper_model = None
+            self.httpd.app._whisper_model_config = None
+        with mock.patch.object(server.importlib, "import_module", side_effect=ModuleNotFoundError("faster_whisper")):
+            self.httpd.app._run_transcription_job(lesson["id"], storage_name)
+        status, _, data = self.request("GET", f"/api/lessons/{lesson['id']}", token=admin_token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["lesson"]["transcription_status"], "failed")
+        self.assertEqual(data["lesson"]["transcript_source"], "whisper")
+        self.assertIn("faster-whisper", data["lesson"]["transcription_error"])
+        self.assertIn("pip install", data["lesson"]["transcription_error"])
 
     def test_hosted_video_transcript_supports_the_normalized_limit(self) -> None:
         admin_token = self.login("admin@learnwithai.demo")

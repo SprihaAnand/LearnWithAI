@@ -6,7 +6,7 @@
     <meta name="description" content="LearnWithAI is an inclusive learning space for community-led learning." />
     <meta name="theme-color" content="#0e4a45" />
     <title>LearnWithAI | Learning that reaches further</title>
-    <link rel="stylesheet" href="styles.css?v=20260924-gemini" />
+    <link rel="stylesheet" href="styles.css?v=20260924-whisper" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -41,7 +41,7 @@
         </button>
         <div class="profile-menu is-hidden" id="profileMenu" role="menu">
           <button type="button" role="menuitem" data-route="dashboard">My learning</button>
-          <button type="button" role="menuitem" data-gemini-settings>Gemini session</button>
+          <button type="button" role="menuitem" data-gemini-settings>Gemini Q&amp;A session</button>
           <button class="admin-only" type="button" role="menuitem" data-route="admin">Admin studio</button>
           <button type="button" role="menuitem" id="signOutButton">Sign out</button>
         </div>
@@ -157,7 +157,7 @@
             <button class="side-nav-item" type="button" data-route="library"><span aria-hidden="true">◫</span> Course library</button>
             <button class="side-nav-item" type="button" data-route="dashboard" data-dashboard-section="progress"><span aria-hidden="true">↗</span> My progress</button>
             <button class="side-nav-item" type="button" data-tutor-open><span aria-hidden="true">✦</span> Learning assistant</button>
-            <button class="side-nav-item" type="button" data-gemini-settings><span aria-hidden="true">⌘</span> Gemini session</button>
+            <button class="side-nav-item" type="button" data-gemini-settings><span aria-hidden="true">⌘</span> Gemini Q&amp;A session</button>
             <div class="side-nav-divider"></div>
             <button class="side-nav-item admin-only" type="button" data-route="admin"><span aria-hidden="true">▧</span> Admin studio</button>
             <button class="side-nav-item" type="button" id="sideSignOut"><span aria-hidden="true">⇥</span> Sign out</button>
@@ -189,7 +189,7 @@
             <button class="side-nav-item" type="button" data-route="dashboard"><span aria-hidden="true">⌂</span> Learner view</button>
             <button class="side-nav-item active" type="button" data-route="admin"><span aria-hidden="true">▧</span> Course studio</button>
             <button class="side-nav-item" type="button" data-route="library"><span aria-hidden="true">◫</span> Course library</button>
-            <button class="side-nav-item" type="button" data-gemini-settings><span aria-hidden="true">⌘</span> Gemini session</button>
+            <button class="side-nav-item" type="button" data-gemini-settings><span aria-hidden="true">⌘</span> Gemini Q&amp;A session</button>
             <div class="side-nav-divider"></div>
             <button class="side-nav-item" type="button" id="adminSignOut"><span aria-hidden="true">⇥</span> Sign out</button>
           </aside>
@@ -209,15 +209,15 @@
                     <label class="video-upload-dropzone" for="lessonVideoFile"><input id="lessonVideoFile" name="videoFile" type="file" accept="video/*" /><span class="upload-symbol" aria-hidden="true">↑</span><span><strong>Upload a video</strong><small id="videoFileName">MP4, WebM, or another browser-ready video</small></span></label>
                     <p class="upload-or">or use a direct hosted file</p>
                     <label>Hosted direct video URL<input id="lessonVideoUrl" name="videoUrl" type="url" inputmode="url" placeholder="https://cdn.example.org/lesson.mp4" /><small class="field-hint">Use a direct HTTPS video file URL—not a watch page. Selecting a file clears this field.</small></label>
-                    <p class="media-source-hint" id="mediaSourceHint" aria-live="polite">Choose a video source to enable the matching transcript options.</p>
+                    <p class="media-source-hint" id="mediaSourceHint" aria-live="polite">Upload a video to transcribe it locally with faster-whisper, or add a hosted video with your own transcript.</p>
                   </fieldset>
                   <fieldset class="transcription-fieldset">
-                    <legend>Transcript for the learning assistant</legend>
-                    <p class="transcription-intro">Give learners a searchable transcript. Gemini uses it to keep lesson answers grounded in what was taught.</p>
+                    <legend>Transcript for learner Q&amp;A</legend>
+                    <p class="transcription-intro">Give learners a searchable transcript. LearnWithAI runs faster-whisper locally for uploaded videos; Gemini uses a ready transcript only to keep learner Q&amp;A grounded in what was taught.</p>
                     <div class="transcription-options" role="radiogroup" aria-label="Transcript method">
-                      <label class="transcription-choice"><input type="radio" name="transcriptionMode" value="auto" checked /><span><strong>Transcribe automatically with Gemini</strong><small>Available for video files uploaded here. Your session key is required.</small></span></label>
+                      <label class="transcription-choice"><input type="radio" name="transcriptionMode" value="auto" checked /><span><strong>Transcribe automatically with local Whisper</strong><small>Uses faster-whisper on LearnWithAI for video files uploaded here. No Gemini API key is needed.</small></span></label>
                       <label class="transcription-choice"><input type="radio" name="transcriptionMode" value="upload" /><span><strong>Upload my own transcript</strong><small>Use a .txt, .srt, or .vtt file.</small></span></label>
-                      <label class="transcription-choice"><input type="radio" name="transcriptionMode" value="none" /><span><strong>Add a transcript later</strong><small>Learners can still watch the video, but Gemini will not have lesson context.</small></span></label>
+                      <label class="transcription-choice"><input type="radio" name="transcriptionMode" value="none" /><span><strong>Add a transcript later</strong><small>Learners can still watch the video, but Gemini Q&amp;A will not have lesson context.</small></span></label>
                     </div>
                     <label class="transcript-file-field" id="transcriptFileField">Transcript file<input id="lessonTranscriptFile" name="transcriptFile" type="file" accept=".txt,.srt,.vtt,text/plain,text/vtt,application/x-subrip" /><small class="field-hint" id="transcriptFileName">Choose a text, SRT, or VTT file.</small></label>
                   </fieldset>
@@ -233,17 +233,17 @@
 
     <aside class="tutor-panel" id="tutorPanel" aria-labelledby="tutorTitle" aria-hidden="true">
       <div class="tutor-head"><div><span class="tutor-orb" aria-hidden="true">✦</span><div><p class="eyebrow">LEARNWITHAI ASSISTANT</p><h2 id="tutorTitle">Let’s work it out.</h2></div></div><button class="icon-close" type="button" id="closeTutor" aria-label="Close learning assistant">×</button></div>
-      <div class="tutor-context"><span aria-hidden="true">◒</span><p id="tutorContextText">When a lesson transcript is ready, Gemini will use it to keep your answer in context.</p></div>
+      <div class="tutor-context"><span aria-hidden="true">◒</span><p id="tutorContextText">When a local Whisper transcript is ready, Gemini will use it to keep your answer in context.</p></div>
       <div class="tutor-gemini-bar"><span class="gemini-connection" id="geminiTutorStatus" aria-live="polite">Gemini session not connected</span><button type="button" data-gemini-settings>Session settings</button></div>
-      <div class="tutor-messages" id="tutorMessages" aria-live="polite"><div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Hi! Add a Gemini API key for this session, then open a lesson with a ready transcript. I’ll answer from that lesson’s content.</p></div></div>
+      <div class="tutor-messages" id="tutorMessages" aria-live="polite"><div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Hi! Add a Gemini API key for this session, then open a lesson with a ready transcript. I’ll answer from that lesson’s content. Local Whisper handles automatic transcription separately.</p></div></div>
       <div class="tutor-suggestions" id="tutorSuggestions"><button type="button">Explain this simply</button><button type="button">Give me an example</button><button type="button">Help me reflect</button></div>
       <form class="tutor-input" id="tutorForm"><label class="sr-only" for="tutorInput">Ask the learning assistant</label><textarea id="tutorInput" rows="1" placeholder="Ask about this lesson’s transcript…" maxlength="1000"></textarea><button type="submit" aria-label="Send question"><span aria-hidden="true">↑</span></button></form>
       <p class="tutor-disclaimer">Gemini is guided by the lesson transcript where available. It offers learning support, not professional advice.</p>
     </aside>
     <aside class="gemini-panel" id="geminiPanel" role="dialog" aria-modal="true" aria-labelledby="geminiPanelTitle" aria-hidden="true">
-      <div class="gemini-panel-head"><div><p class="eyebrow">SESSION-ONLY AI</p><h2 id="geminiPanelTitle">Connect Gemini</h2></div><button class="icon-close" type="button" id="closeGeminiPanel" aria-label="Close Gemini session settings">×</button></div>
-      <div class="gemini-panel-intro"><span aria-hidden="true">✦</span><p>Use your own Gemini API key for this signed-in session. It is never saved in this browser, course content, or learner transcript.</p></div>
-      <form id="geminiKeyForm" class="gemini-key-form"><label for="geminiApiKey">Gemini API key<input id="geminiApiKey" name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Gemini API key" required /></label><p class="gemini-key-help">The key is sent over your current session only so LearnWithAI can transcribe uploaded video and answer transcript-grounded questions.</p><div class="gemini-actions"><button type="button" class="button button-outline" id="removeGeminiKey">Remove key</button><button type="submit" class="button">Use for this session <span aria-hidden="true">→</span></button></div></form>
+      <div class="gemini-panel-head"><div><p class="eyebrow">SESSION-ONLY AI</p><h2 id="geminiPanelTitle">Connect Gemini for Q&amp;A</h2></div><button class="icon-close" type="button" id="closeGeminiPanel" aria-label="Close Gemini session settings">×</button></div>
+      <div class="gemini-panel-intro"><span aria-hidden="true">✦</span><p>Use your own Gemini API key for transcript-grounded learner Q&amp;A in this signed-in session. It is never saved in this browser, course content, or learner transcript.</p></div>
+      <form id="geminiKeyForm" class="gemini-key-form"><label for="geminiApiKey">Gemini API key<input id="geminiApiKey" name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Gemini API key" required /></label><p class="gemini-key-help">The key is sent over your current session only for transcript-grounded learner Q&amp;A. Automatic transcription runs locally with faster-whisper and never needs this key.</p><div class="gemini-actions"><button type="button" class="button button-outline" id="removeGeminiKey">Remove key</button><button type="submit" class="button">Use for this session <span aria-hidden="true">→</span></button></div></form>
       <p class="gemini-key-status" id="geminiKeyStatus" aria-live="polite">No Gemini key is connected for this session.</p>
     </aside>
     <button class="tutor-fab" id="tutorFab" type="button" data-tutor-open aria-label="Open learning assistant"><span aria-hidden="true">✦</span><span>Ask for help</span></button>
@@ -252,6 +252,6 @@
 
     <template id="courseCardTemplate"><article class="course-card"><button class="course-visual" type="button"><span class="course-visual-pattern" aria-hidden="true"></span><span class="course-visual-icon" aria-hidden="true"></span><span class="course-badge"></span><span class="course-duration"></span><span class="course-play" aria-hidden="true">▶</span></button><div class="course-card-body"><p class="course-meta"></p><h3><button type="button" class="course-title-button"></button></h3><p class="course-description"></p><div class="course-card-footer"><div class="tiny-progress"><span></span></div><span class="course-progress-text"></span><button class="course-arrow" type="button" aria-label="Open course">→</button></div></div></article></template>
 
-    <script src="app.js?v=20260924-gemini"></script>
+    <script src="app.js?v=20260924-whisper"></script>
   </body>
 </html>

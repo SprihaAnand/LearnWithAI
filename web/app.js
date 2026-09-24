@@ -101,7 +101,7 @@
     }
     const settingsStatus = $("#geminiKeyStatus");
     if (settingsStatus) settingsStatus.textContent = configured
-      ? "Gemini is connected for this signed-in session. You can remove the key at any time."
+      ? "Gemini is connected for transcript-grounded learner Q&A in this signed-in session. You can remove the key at any time."
       : "No Gemini key is connected for this session.";
     const removeButton = $("#removeGeminiKey");
     if (removeButton) removeButton.disabled = !configured;
@@ -157,12 +157,12 @@
     const submit = $("#geminiKeyForm button[type='submit']");
     try {
       submit.disabled = true;
-      $("#geminiKeyStatus").textContent = "Connecting Gemini for this session…";
+      $("#geminiKeyStatus").textContent = "Connecting Gemini for transcript-grounded Q&A…";
       await api("/api/session/gemini-key", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) });
       input.value = "";
       state.geminiConfigured = true;
       renderGeminiStatus();
-      toast("Gemini is ready for this session.", "success");
+      toast("Gemini is ready for transcript-grounded learner Q&A.", "success");
     } catch (error) {
       $("#geminiKeyStatus").textContent = error.message;
       toast(error.message, "error");
@@ -290,16 +290,16 @@
         tone: "missing",
         availability: "Enroll to unlock the transcript",
         label: "Transcript available after enrollment",
-        detail: "Enroll in this course to read its transcript and use Gemini for lesson-grounded questions.",
+        detail: "Enroll in this course to read its transcript and use Gemini for lesson-grounded learner questions.",
         button: "Enroll to unlock",
       };
     }
     if (hasText(lesson?.transcript)) {
       return {
         tone: "ready",
-        availability: "Transcript ready · Gemini can use it",
+        availability: "Transcript ready · Gemini Q&A can use it",
         label: "Transcript ready",
-        detail: "Gemini can use this lesson’s transcript to answer questions with lesson context.",
+        detail: "Gemini can use this lesson’s transcript to answer learner questions with lesson context.",
         button: "Read transcript",
       };
     }
@@ -308,7 +308,7 @@
         tone: "error",
         availability: "Transcript needs attention",
         label: "Transcript unavailable",
-        detail: failure || "The transcript could not be prepared. Upload a transcript file or try automatic transcription again.",
+        detail: failure || "The transcript could not be prepared. Upload a transcript file or try local Whisper transcription again.",
         button: "Transcript status",
       };
     }
@@ -317,7 +317,7 @@
         tone: "processing",
         availability: "Transcript is being prepared",
         label: "Transcription in progress",
-        detail: "Gemini will use this lesson’s transcript as soon as automatic transcription finishes.",
+        detail: "Local Whisper is preparing this transcript. Gemini Q&A can use it as soon as transcription finishes.",
         button: "Transcript processing",
       };
     }
@@ -325,7 +325,7 @@
       tone: "missing",
       availability: "No transcript yet",
       label: "Transcript not added",
-      detail: "This lesson does not have a transcript yet, so Gemini cannot ground answers in this lesson’s content.",
+      detail: "This lesson does not have a transcript yet, so Gemini Q&A cannot ground answers in this lesson’s content.",
       button: "Transcript status",
     };
   }
@@ -355,11 +355,11 @@
     const context = $("#tutorContextText");
     const tutorInput = $("#tutorInput");
     if (context) context.textContent = lesson.transcript_access === false
-      ? "Enroll in this course to use its transcript with the Gemini learning assistant."
+      ? "Enroll in this course to use its transcript with Gemini learner Q&A."
       : hasText(lesson.transcript)
       ? `Ask about “${lesson.title}”. Gemini will use this lesson’s transcript to keep its answer in context.`
       : summary.tone === "processing"
-        ? "This lesson’s transcript is still being prepared. Ask again once it is ready so Gemini can answer from the lesson content."
+        ? "Local Whisper is still preparing this lesson’s transcript. Ask again once it is ready so Gemini can answer from the lesson content."
         : "No lesson transcript is ready yet. Add one so Gemini can answer questions using this lesson’s content.";
     if (tutorInput) tutorInput.placeholder = lesson.transcript_access === false
       ? "Enroll to unlock lesson questions…"
@@ -705,12 +705,8 @@
       if (hasVideoFile && hostedUrl) throw new Error("Choose either a video file or a hosted direct URL, not both.");
       if (hasVideoFile && !String(videoFile.type || "").startsWith("video/")) throw new Error("Choose a browser-ready video file.");
       if (hostedUrl && !isHostedVideoUrl(hostedUrl)) throw new Error("Use a direct HTTPS URL for the hosted video.");
-      if (transcriptMode === "auto" && !hasVideoFile) throw new Error("Automatic Gemini transcription needs a video file uploaded to LearnWithAI. For a hosted video, upload your transcript instead.");
+      if (transcriptMode === "auto" && !hasVideoFile) throw new Error("Local Whisper transcription needs a video file uploaded to LearnWithAI. For a hosted video, upload your transcript instead.");
       if (transcriptMode === "upload" && !isTranscriptFile(transcriptFile)) throw new Error("Choose a .txt, .srt, or .vtt transcript file.");
-      if (transcriptMode === "auto" && !await refreshGeminiStatus()) {
-        openGeminiSettings();
-        throw new Error("Add a Gemini API key for this session before starting automatic transcription.");
-      }
       const hostedTranscript = transcriptMode === "upload" && !hasVideoFile ? await readHostedTranscript(transcriptFile) : "";
       setPublishingState(true, hasVideoFile ? "Creating course and uploading video…" : "Creating course…");
       const { course } = await api("/api/admin/courses", { method: "POST", body: JSON.stringify(payload) });
@@ -729,10 +725,10 @@
         uploadData.append("video", videoFile);
         uploadData.append("transcription_mode", transcriptMode);
         if (transcriptMode === "upload") uploadData.append("transcript_file", transcriptFile);
-        setPublishingState(true, transcriptMode === "auto" ? "Uploading video and starting Gemini transcription…" : "Uploading lesson video…");
+        setPublishingState(true, transcriptMode === "auto" ? "Uploading video and starting local Whisper transcription…" : "Uploading lesson video…");
         await api(`/api/lessons/${lesson.id}/video`, { method: "POST", body: uploadData });
       }
-      const transcriptMessage = transcriptMode === "auto" ? " Gemini is preparing the transcript." : transcriptMode === "upload" ? " The transcript is ready for Gemini." : " Add a transcript later to enable grounded Gemini answers.";
+      const transcriptMessage = transcriptMode === "auto" ? " Local Whisper is preparing the transcript." : transcriptMode === "upload" ? " The transcript is ready for Gemini Q&A." : " Add a transcript later to enable grounded Gemini answers.";
       $("#courseSaveStatus").textContent = `Published “${course.title}” with its first lesson.${transcriptMessage}`;
       formElement.reset();
       syncMediaSourceControls();
@@ -776,8 +772,8 @@
     const hint = $("#mediaSourceHint");
     if (!hint) return;
     if (hasVideoFile) {
-      hint.textContent = activeMode === "auto" && !state.geminiConfigured
-        ? "Your video will upload here. Add a Gemini key for this session before automatic transcription."
+      hint.textContent = activeMode === "auto"
+        ? "Your video will upload to LearnWithAI, then local faster-whisper will prepare its transcript. No Gemini API key is needed."
         : "Your video will upload to LearnWithAI. Learners will stream it from the course page.";
     } else if (hasHostedUrl) {
       hint.textContent = activeMode === "upload"

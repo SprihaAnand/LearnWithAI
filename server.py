@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""LearnWithAI's dependency-free development server.
+"""LearnWithAI's small development server and local transcription worker.
 
-It intentionally uses only the Python standard library so a new NGO deployment
-can be evaluated without a separate application server or a package install.
-Run ``python server.py`` and open http://127.0.0.1:8000.
+The HTTP application uses the Python standard library. Automatic video
+transcription is an optional, local ``faster-whisper`` runtime that is loaded
+only after an administrator requests it. Run ``python server.py`` and open
+http://127.0.0.1:8000.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import argparse
 import html
 import hashlib
 import hmac
-import http.client
+import importlib
 import json
 import mimetypes
 import os
@@ -54,6 +55,33 @@ ALLOWED_VIDEO_TYPES = {
 ALLOWED_TRANSCRIPT_EXTENSIONS = {".txt", ".srt", ".vtt"}
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_WHISPER_MODEL = "base"
+DEFAULT_WHISPER_DEVICE = "cpu"
+DEFAULT_WHISPER_COMPUTE_TYPE = "int8"
+MAX_GENERATED_TRANSCRIPT_CHARS = 200_000
+ALLOWED_WHISPER_MODELS = {
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large-v3-turbo",
+    "turbo",
+    "distil-small.en",
+    "distil-medium.en",
+    "distil-large-v2",
+    "distil-large-v3",
+    "distil-large-v3.5",
+}
+ALLOWED_WHISPER_DEVICES = {"auto", "cpu", "cuda"}
+ALLOWED_WHISPER_COMPUTE_TYPES = {"auto", "default", "int8", "int8_float16", "int8_float32", "float16", "float32"}
 PLAYBACK_TICKET_TTL_SECONDS = 300
 PLAYBACK_COOKIE_NAME = "learnwithai_playback"
 
@@ -75,6 +103,14 @@ class APIError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+class WhisperTranscriptionError(Exception):
+    """A safe, actionable failure while preparing a local Whisper transcript."""
+
+    def __init__(self, public_message: str) -> None:
+        self.public_message = public_message
+        super().__init__(public_message)
 
 
 class ManagedConnection(sqlite3.Connection):
@@ -167,7 +203,7 @@ def normalize_transcript(raw: bytes, extension: str) -> str:
     """Turn a supplied .txt/.srt/.vtt file into safe plain text.
 
     Captions have timing and markup that are useful to a player but distract a
-    tutor. The timing remains available in generated transcripts; uploaded
+    tutor. Whisper-generated transcripts retain their segment timing; uploaded
     subtitle files are reduced to readable text.
     """
     if len(raw) > MAX_TRANSCRIPT_BYTES:
@@ -235,6 +271,16 @@ class LearnWithAIApp:
         # Keys are deliberately memory-only and scoped to a particular bearer-token hash.
         self._gemini_session_keys: dict[str, tuple[str, int]] = {}
         self._gemini_key_lock = threading.Lock()
+        # The local Whisper dependency is imported and modelled only when an
+        # administrator actually requests automatic transcription. Keeping the
+        # cache behind this lock avoids duplicate first-download/model-load work
+        # when several uploads are queued together.
+        self._whisper_model: Any = None
+        self._whisper_model_config: Optional[tuple[str, str, str]] = None
+        self._whisper_model_lock = threading.Lock()
+        # A single reference-process should not run multiple CPU/GPU inference
+        # jobs at once. Jobs still remain asynchronous from the upload request.
+        self._whisper_transcription_lock = threading.Lock()
         self._playback_tickets: dict[str, tuple[int, int, int]] = {}
         self._playback_ticket_lock = threading.Lock()
         # Multipart parsing is memory-bound, so admit one bounded admin upload at
@@ -820,7 +866,7 @@ class LearnWithAIApp:
                     "transcript_available": bool(row["transcript"].strip()),
                 }
             )
-            if row["transcript_source"] == "generated":
+            if row["transcript_source"] in {"generated", "whisper"}:
                 item["transcript_notice"] = "AI-generated transcript — review it for accuracy; it is not a verbatim record."
         else:
             item["transcript_available"] = False
@@ -1178,7 +1224,6 @@ class LearnWithAIApp:
         self,
         lesson_id: int,
         user: dict[str, Any],
-        token_hash: str,
         fields: dict[str, str],
         files: dict[str, UploadedPart],
     ) -> dict[str, Any]:
@@ -1207,9 +1252,7 @@ class LearnWithAIApp:
         elif mode == "auto":
             if "transcript_file" in files:
                 raise APIError(400, "invalid_input", "Choose upload mode to use a transcript file.")
-            if not self._gemini_key_for_hash(token_hash):
-                raise APIError(400, "gemini_key_required", "Add a Gemini API key for this signed-in session before automatic transcription.")
-            source = "generated"
+            source = "whisper"
         elif "transcript_file" in files:
             raise APIError(400, "invalid_input", "Choose upload mode to use a transcript file.")
 
@@ -1239,13 +1282,13 @@ class LearnWithAIApp:
             raise
         self._remove_uploaded_video(old_storage)
         if mode == "auto":
-            self._start_transcription_job(lesson_id, storage_name, mime_type, token_hash)
+            self._start_transcription_job(lesson_id, storage_name)
         return serialized
 
-    def _start_transcription_job(self, lesson_id: int, storage_name: str, mime_type: str, token_hash: str) -> None:
+    def _start_transcription_job(self, lesson_id: int, storage_name: str) -> None:
         worker = threading.Thread(
             target=self._run_transcription_job,
-            args=(lesson_id, storage_name, mime_type, token_hash),
+            args=(lesson_id, storage_name),
             name=f"learnwithai-transcript-{lesson_id}",
             daemon=True,
         )
@@ -1258,7 +1301,7 @@ class LearnWithAIApp:
         status: str,
         *,
         transcript: Optional[str] = None,
-        source: Optional[str] = "generated",
+        source: Optional[str] = "whisper",
         error: Optional[str] = None,
     ) -> bool:
         with self.connect() as db:
@@ -1269,31 +1312,165 @@ class LearnWithAIApp:
             )
             return cursor.rowcount == 1
 
-    def _run_transcription_job(self, lesson_id: int, storage_name: str, mime_type: str, token_hash: str) -> None:
-        """Run outside the request thread; the BYOK value is looked up only in memory."""
-        api_key = self._gemini_key_for_hash(token_hash)
-        if not api_key:
-            self._set_transcription_state(
-                lesson_id, storage_name, "failed", error="Automatic transcription needs the Gemini key from the upload session. Upload again after adding a key."
-            )
-            return
+    def _run_transcription_job(self, lesson_id: int, storage_name: str) -> None:
+        """Create a local Whisper draft outside the upload request thread."""
         try:
             path = self._safe_upload_path(storage_name)
             if not path.is_file():
                 raise FileNotFoundError
             if not self._set_transcription_state(lesson_id, storage_name, "processing"):
                 return
-            transcript = self._gemini_transcribe_video(api_key, path, mime_type, f"lesson-{lesson_id}-video")
-            transcript = clean_text(transcript, "generated transcript", 1, 200_000)
-            self._set_transcription_state(lesson_id, storage_name, "ready", transcript=transcript, source="generated")
-        except Exception:
-            # Provider errors may contain request data or upstream details; retain only safe, actionable copy.
+            transcript = self._whisper_transcribe_video(path)
+            transcript = clean_text(transcript, "Whisper transcript", 1, MAX_GENERATED_TRANSCRIPT_CHARS)
+            self._set_transcription_state(lesson_id, storage_name, "ready", transcript=transcript, source="whisper")
+        except WhisperTranscriptionError as error:
+            self._set_transcription_state(lesson_id, storage_name, "failed", source="whisper", error=error.public_message)
+        except FileNotFoundError:
             self._set_transcription_state(
                 lesson_id,
                 storage_name,
                 "failed",
-                error="Automatic transcription could not be completed. Upload a reviewed transcript or try again.",
+                source="whisper",
+                error="The uploaded video is no longer available for automatic transcription. Upload it again or attach a reviewed transcript.",
             )
+        except Exception:
+            # Decoder/model failures can contain local paths or implementation
+            # details, so retain a stable recovery instruction only.
+            self._set_transcription_state(
+                lesson_id,
+                storage_name,
+                "failed",
+                source="whisper",
+                error="Local Whisper transcription could not be completed. Check the server's Whisper setup, then retry or attach a reviewed transcript.",
+            )
+
+    @staticmethod
+    def _whisper_segment_value(segment: Any, name: str) -> Any:
+        if isinstance(segment, dict):
+            return segment.get(name)
+        return getattr(segment, name, None)
+
+    @staticmethod
+    def _whisper_timestamp(value: Any) -> Optional[str]:
+        """Return a compact, stable timestamp when the decoder supplies one."""
+        if isinstance(value, bool):
+            return None
+        try:
+            total_seconds = int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if total_seconds < 0:
+            return None
+        hours, remainder = divmod(total_seconds, 3_600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    @classmethod
+    def _format_whisper_segments(cls, segments: Any) -> str:
+        """Convert faster-whisper segments into bounded, tutor-ready plain text."""
+        lines: list[str] = []
+        size = 0
+        try:
+            iterator = iter(segments)
+        except TypeError:
+            raise WhisperTranscriptionError("Local Whisper returned an unreadable transcript. Attach a reviewed transcript instead.") from None
+        for segment in iterator:
+            if isinstance(segment, str):
+                raw_text = segment
+                start = end = None
+            else:
+                raw_text = cls._whisper_segment_value(segment, "text")
+                start = cls._whisper_segment_value(segment, "start")
+                end = cls._whisper_segment_value(segment, "end")
+            if not isinstance(raw_text, str):
+                continue
+            text = re.sub(r"\s+", " ", raw_text).strip()
+            if not text:
+                continue
+            start_label = cls._whisper_timestamp(start)
+            end_label = cls._whisper_timestamp(end)
+            if start_label and end_label:
+                line = f"[{start_label} - {end_label}] {text}"
+            elif start_label:
+                line = f"[{start_label}] {text}"
+            else:
+                line = text
+            projected_size = size + len(line) + (1 if lines else 0)
+            if projected_size > MAX_GENERATED_TRANSCRIPT_CHARS:
+                raise WhisperTranscriptionError(
+                    "The automatic transcript is too large to publish safely. Attach a reviewed transcript for this lesson instead."
+                )
+            lines.append(line)
+            size = projected_size
+        transcript = "\n".join(lines).strip()
+        if not transcript:
+            raise WhisperTranscriptionError(
+                "Local Whisper did not find readable speech in this video. Attach a reviewed transcript instead."
+            )
+        return transcript
+
+    @staticmethod
+    def _whisper_setting(name: str, default: str, allowed: set[str]) -> str:
+        value = os.environ.get(name, default).strip().lower()
+        if value not in allowed:
+            raise WhisperTranscriptionError(
+                "Local Whisper is misconfigured. Set LEARNWITHAI_WHISPER_MODEL, LEARNWITHAI_WHISPER_DEVICE, and "
+                "LEARNWITHAI_WHISPER_COMPUTE_TYPE to supported values, then retry."
+            )
+        return value
+
+    def _whisper_config(self) -> tuple[str, str, str]:
+        model = self._whisper_setting("LEARNWITHAI_WHISPER_MODEL", DEFAULT_WHISPER_MODEL, ALLOWED_WHISPER_MODELS)
+        device = self._whisper_setting("LEARNWITHAI_WHISPER_DEVICE", DEFAULT_WHISPER_DEVICE, ALLOWED_WHISPER_DEVICES)
+        compute_type = self._whisper_setting(
+            "LEARNWITHAI_WHISPER_COMPUTE_TYPE", DEFAULT_WHISPER_COMPUTE_TYPE, ALLOWED_WHISPER_COMPUTE_TYPES
+        )
+        if device == "cpu" and compute_type in {"float16", "int8_float16"}:
+            raise WhisperTranscriptionError(
+                "Local Whisper is misconfigured: CPU transcription needs an int8, int8_float32, float32, default, or auto compute type."
+            )
+        return model, device, compute_type
+
+    def _get_whisper_model(self) -> Any:
+        """Lazily load and cache a configured faster-whisper model per process."""
+        config = self._whisper_config()
+        with self._whisper_model_lock:
+            if self._whisper_model is not None and self._whisper_model_config == config:
+                return self._whisper_model
+            try:
+                module = importlib.import_module("faster_whisper")
+                whisper_model_class = getattr(module, "WhisperModel")
+            except Exception as error:
+                raise WhisperTranscriptionError(
+                    "Automatic transcription needs the local faster-whisper package. Install it on this server with "
+                    "`python -m pip install -r requirements.txt`, then retry."
+                ) from error
+            try:
+                model = whisper_model_class(config[0], device=config[1], compute_type=config[2])
+            except Exception as error:
+                raise WhisperTranscriptionError(
+                    "The configured local Whisper model could not be loaded. Download the selected model on this server or "
+                    "choose a supported LEARNWITHAI_WHISPER_MODEL, then retry."
+                ) from error
+            self._whisper_model = model
+            self._whisper_model_config = config
+            return model
+
+    def _whisper_transcribe_video(self, path: Path) -> str:
+        """Decode one uploaded video locally and preserve segment timestamps when available."""
+        model = self._get_whisper_model()
+        try:
+            with self._whisper_transcription_lock:
+                segments, _ = model.transcribe(str(path), beam_size=5, vad_filter=True)
+                return self._format_whisper_segments(segments)
+        except WhisperTranscriptionError:
+            raise
+        except Exception as error:
+            raise WhisperTranscriptionError(
+                "Local Whisper could not transcribe this video. Check that the media is playable or attach a reviewed transcript."
+            ) from error
 
     def _gemini_url(self, path: str) -> str:
         return GEMINI_API_BASE + path
@@ -1331,129 +1508,6 @@ class LearnWithAIApp:
         if not isinstance(response_data, dict):
             raise ValueError("Invalid Gemini response")
         return self._extract_gemini_text(response_data)
-
-    def _gemini_upload_file(self, api_key: str, path: Path, mime_type: str, display_name: str) -> dict[str, Any]:
-        size = path.stat().st_size
-        start_payload = json.dumps({"file": {"display_name": display_name}}).encode("utf-8")
-        start_request = urllib.request.Request(
-            self._gemini_url("/upload/v1beta/files"),
-            data=start_payload,
-            headers={
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json",
-                "X-Goog-Upload-Protocol": "resumable",
-                "X-Goog-Upload-Command": "start",
-                "X-Goog-Upload-Header-Content-Length": str(size),
-                "X-Goog-Upload-Header-Content-Type": mime_type,
-                "User-Agent": "LearnWithAI/1.0",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(start_request, timeout=30) as response:  # nosec B310: configured provider base
-            upload_url = response.headers.get("X-Goog-Upload-URL")
-        parsed_upload_url = urllib.parse.urlparse(upload_url or "")
-        if (
-            parsed_upload_url.scheme != "https"
-            or not parsed_upload_url.hostname
-            or parsed_upload_url.username
-            or parsed_upload_url.password
-        ):
-            raise ValueError("Gemini did not return a safe upload URL")
-        try:
-            upload_port = parsed_upload_url.port
-        except ValueError:
-            raise ValueError("Gemini did not return a safe upload URL") from None
-        request_target = parsed_upload_url.path or "/"
-        if parsed_upload_url.query:
-            request_target += "?" + parsed_upload_url.query
-        connection = http.client.HTTPSConnection(parsed_upload_url.hostname, upload_port or 443, timeout=90)
-        try:
-            # Stream the locally stored file into the resumable upload rather than
-            # making a second in-memory copy of an administrator's video.
-            connection.putrequest("POST", request_target, skip_accept_encoding=True)
-            connection.putheader("Content-Length", str(size))
-            connection.putheader("X-Goog-Upload-Offset", "0")
-            connection.putheader("X-Goog-Upload-Command", "upload, finalize")
-            connection.putheader("Content-Type", mime_type)
-            connection.putheader("User-Agent", "LearnWithAI/1.0")
-            connection.endheaders()
-            with path.open("rb") as video_file:
-                while chunk := video_file.read(1024 * 1024):
-                    connection.send(chunk)
-            response = connection.getresponse()
-            response_body = response.read()
-            if response.status < 200 or response.status >= 300:
-                raise urllib.error.HTTPError(upload_url, response.status, response.reason, response.headers, None)
-            response_data = json.loads(response_body.decode("utf-8"))
-        except (OSError, http.client.HTTPException) as error:
-            raise urllib.error.URLError("Gemini video upload could not be completed") from error
-        finally:
-            connection.close()
-        file_info = response_data.get("file", response_data) if isinstance(response_data, dict) else None
-        if not isinstance(file_info, dict) or not isinstance(file_info.get("name"), str) or not isinstance(file_info.get("uri"), str):
-            raise ValueError("Gemini did not return file metadata")
-        return file_info
-
-    def _gemini_wait_for_file(self, api_key: str, name: str) -> dict[str, Any]:
-        if not re.fullmatch(r"files/[A-Za-z0-9_-]+", name):
-            raise ValueError("Invalid Gemini file name")
-        safe_name = urllib.parse.quote(name, safe="/")
-        for _ in range(60):
-            request = urllib.request.Request(
-                self._gemini_url(f"/v1beta/{safe_name}"),
-                headers={"x-goog-api-key": api_key, "User-Agent": "LearnWithAI/1.0"},
-                method="GET",
-            )
-            with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310: configured provider base
-                response_data = json.loads(response.read().decode("utf-8"))
-            file_info = response_data.get("file", response_data) if isinstance(response_data, dict) else None
-            if not isinstance(file_info, dict):
-                raise ValueError("Invalid Gemini file status")
-            state = str(file_info.get("state", "")).upper()
-            if state in {"ACTIVE", "READY", "SUCCEEDED"}:
-                return file_info
-            if state in {"FAILED", "ERROR", "CANCELLED"}:
-                raise ValueError("Gemini could not process the video")
-            time.sleep(5)
-        raise TimeoutError("Gemini file processing timed out")
-
-    def _gemini_delete_file(self, api_key: str, name: str) -> None:
-        if not re.fullmatch(r"files/[A-Za-z0-9_-]+", name):
-            return
-        request = urllib.request.Request(
-            self._gemini_url(f"/v1beta/{urllib.parse.quote(name, safe='/')}"),
-            headers={"x-goog-api-key": api_key, "User-Agent": "LearnWithAI/1.0"},
-            method="DELETE",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=20):  # nosec B310: configured provider base
-                return
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
-            return
-
-    def _gemini_transcribe_video(self, api_key: str, path: Path, mime_type: str, display_name: str) -> str:
-        remote_file: Optional[dict[str, Any]] = None
-        try:
-            remote_file = self._gemini_upload_file(api_key, path, mime_type, display_name)
-            ready_file = self._gemini_wait_for_file(api_key, str(remote_file["name"]))
-            file_uri = ready_file.get("uri") or remote_file.get("uri")
-            if not isinstance(file_uri, str) or not file_uri.startswith("https://"):
-                raise ValueError("Gemini file URI is invalid")
-            prompt = (
-                "Create a timestamped draft transcript of the supplied lesson video. Return only the transcript, with concise "
-                "[MM:SS] markers. Transcribe spoken words faithfully where clear; mark uncertain speech as [unclear] rather than inventing content. "
-                "This is an AI-generated draft that must be reviewed by a human and is not a verbatim record."
-            )
-            return self._gemini_interaction_text(
-                api_key,
-                [
-                    {"type": "text", "text": prompt},
-                    {"type": "video", "uri": file_uri, "mime_type": mime_type},
-                ],
-            )
-        finally:
-            if remote_file and isinstance(remote_file.get("name"), str):
-                self._gemini_delete_file(api_key, remote_file["name"])
 
     def streamable_video(self, lesson_id: int, user: dict[str, Any]) -> tuple[Path, str]:
         """Return only an authorized uploaded lesson video, never a caller-provided path."""
@@ -1823,7 +1877,7 @@ class LearnWithAIHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"lesson": self.app.get_lesson(clean_identifier(parts[2]), user)})
             return
         if len(parts) == 4 and parts[:2] == ["api", "lessons"] and parts[3] == "video" and method == "POST":
-            user, token_hash = self.app.authenticated_session(self.headers.get("Authorization"))
+            user = self.app.authenticate(self.headers.get("Authorization"))
             try:
                 self.app.require_admin(user)
             except APIError:
@@ -1835,7 +1889,7 @@ class LearnWithAIHandler(BaseHTTPRequestHandler):
                 raise APIError(429, "upload_busy", "Another video upload is being prepared. Please try again in a moment.")
             try:
                 fields, files = self._read_multipart()
-                lesson = self.app.upload_lesson_video(clean_identifier(parts[2]), user, token_hash, fields, files)
+                lesson = self.app.upload_lesson_video(clean_identifier(parts[2]), user, fields, files)
             finally:
                 self.app.release_upload_slot()
             self._send_json(201, {"lesson": lesson})

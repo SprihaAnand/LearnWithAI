@@ -1,0 +1,2 @@
+# Local, private Whisper speech-to-text runtime used for automatic lesson transcription.
+faster-whisper>=1.2.1,<2.0
