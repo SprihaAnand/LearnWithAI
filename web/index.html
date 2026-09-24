@@ -235,7 +235,7 @@
     <aside class="tutor-panel" id="tutorPanel" aria-labelledby="tutorTitle" aria-hidden="true">
       <div class="tutor-head"><div><span class="tutor-orb" aria-hidden="true">✦</span><div><p class="eyebrow">LEARNWITHAI ASSISTANT</p><h2 id="tutorTitle">Let’s work it out.</h2></div></div><button class="icon-close" type="button" id="closeTutor" aria-label="Close learning assistant">×</button></div>
       <div class="tutor-context"><span aria-hidden="true">◒</span><p id="tutorContextText">When a local Whisper transcript is ready, Gemini will use it to keep your answer in context.</p></div>
-      <div class="tutor-gemini-bar"><span class="gemini-connection" id="geminiTutorStatus" aria-live="polite">Gemini session not connected</span><button type="button" data-gemini-settings>Session settings</button></div>
+      <div class="tutor-gemini-bar"><span class="gemini-connection" id="geminiTutorStatus" aria-live="polite">No Gemini key saved</span><button type="button" data-gemini-settings>Session settings</button></div>
       <div class="tutor-messages" id="tutorMessages" aria-live="polite"><div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Hi! Add a Gemini API key for this session, then open a lesson with a ready transcript. I’ll answer from that lesson’s content. Local Whisper handles automatic transcription separately.</p></div></div>
       <div class="tutor-suggestions" id="tutorSuggestions"><button type="button">Explain this simply</button><button type="button">Give me an example</button><button type="button">Help me reflect</button></div>
       <form class="tutor-input" id="tutorForm"><label class="sr-only" for="tutorInput">Ask the learning assistant</label><textarea id="tutorInput" rows="1" placeholder="Ask about this lesson’s transcript…" maxlength="1000"></textarea><button type="submit" aria-label="Send question"><span aria-hidden="true">↑</span></button></form>
@@ -245,7 +245,7 @@
       <div class="gemini-panel-head"><div><p class="eyebrow">SESSION-ONLY AI</p><h2 id="geminiPanelTitle">Connect Gemini for Q&amp;A</h2></div><button class="icon-close" type="button" id="closeGeminiPanel" aria-label="Close Gemini session settings">×</button></div>
       <div class="gemini-panel-intro"><span aria-hidden="true">✦</span><p>Use your own Gemini API key for transcript-grounded learner Q&amp;A in this signed-in session. It is never saved in this browser, course content, or learner transcript.</p></div>
       <form id="geminiKeyForm" class="gemini-key-form"><label for="geminiApiKey">Gemini API key<input id="geminiApiKey" name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Gemini API key" required /></label><p class="gemini-key-help">The key is sent over your current session only for transcript-grounded learner Q&amp;A. Automatic transcription runs locally with faster-whisper and never needs this key.</p><div class="gemini-actions"><button type="button" class="button button-outline" id="removeGeminiKey">Remove key</button><button type="submit" class="button">Use for this session <span aria-hidden="true">→</span></button></div></form>
-      <p class="gemini-key-status" id="geminiKeyStatus" aria-live="polite">No Gemini key is connected for this session.</p>
+      <p class="gemini-key-status" id="geminiKeyStatus" aria-live="polite">No Gemini key is saved for this session.</p>
     </aside>
     <button class="tutor-fab" id="tutorFab" type="button" data-tutor-open aria-label="Open learning assistant"><span aria-hidden="true">✦</span><span>Ask for help</span></button>
     <div class="overlay" id="overlay" aria-hidden="true"></div>
@@ -253,6 +253,6 @@
 
     <template id="courseCardTemplate"><article class="course-card"><button class="course-visual" type="button"><span class="course-visual-pattern" aria-hidden="true"></span><span class="course-visual-icon" aria-hidden="true"></span><span class="course-badge"></span><span class="course-duration"></span><span class="course-play" aria-hidden="true">▶</span></button><div class="course-card-body"><p class="course-meta"></p><h3><button type="button" class="course-title-button"></button></h3><p class="course-description"></p><div class="course-card-footer"><div class="tiny-progress"><span></span></div><span class="course-progress-text"></span><button class="course-arrow" type="button" aria-label="Open course">→</button></div></div></article></template>
 
-    <script src="app.js?v=20260924-upload-limits"></script>
+    <script src="app.js?v=20260924-gemini-errors"></script>
   </body>
 </html>

@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import importlib
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -55,6 +56,7 @@ ALLOWED_VIDEO_TYPES = {
 ALLOWED_TRANSCRIPT_EXTENSIONS = {".txt", ".srt", ".vtt"}
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_REQUEST_TIMEOUT_SECONDS = 60
 DEFAULT_WHISPER_MODEL = "base"
 DEFAULT_WHISPER_DEVICE = "cpu"
 DEFAULT_WHISPER_COMPUTE_TYPE = "int8"
@@ -109,6 +111,15 @@ class WhisperTranscriptionError(Exception):
     """A safe, actionable failure while preparing a local Whisper transcript."""
 
     def __init__(self, public_message: str) -> None:
+        self.public_message = public_message
+        super().__init__(public_message)
+
+
+class GeminiRequestError(Exception):
+    """A provider failure safe to display without credentials or request content."""
+
+    def __init__(self, code: str, public_message: str) -> None:
+        self.code = code
         self.public_message = public_message
         super().__init__(public_message)
 
@@ -1477,6 +1488,28 @@ class LearnWithAIApp:
 
     @staticmethod
     def _extract_gemini_text(response_data: dict[str, Any]) -> str:
+        if response_data.get("status", "completed") != "completed":
+            raise ValueError("Gemini did not complete the response")
+        # REST responses contain steps; output_text is an SDK convenience.
+        # Return only the final model answer, never thoughts, tool results or
+        # echoed user input. Keep compatibility with earlier response shapes.
+        if "steps" in response_data:
+            steps = response_data["steps"]
+            if isinstance(steps, list):
+                for step in reversed(steps):
+                    if not isinstance(step, dict) or step.get("type") != "model_output":
+                        continue
+                    content = step.get("content")
+                    if isinstance(content, list):
+                        blocks = [
+                            part["text"].strip() for part in content
+                            if isinstance(part, dict) and part.get("type") == "text"
+                            and isinstance(part.get("text"), str) and part["text"].strip()
+                        ]
+                        if blocks:
+                            return "\n".join(blocks)
+                    break
+            raise ValueError("Gemini response did not contain model text")
         text = response_data.get("output_text")
         if isinstance(text, str) and text.strip():
             return text.strip()
@@ -1489,11 +1522,52 @@ class LearnWithAIApp:
                     continue
                 if item.get("type") in {"text", "output_text"} and isinstance(item.get("text"), str) and item["text"].strip():
                     return item["text"].strip()
-                for content in item.get("content", []):
+                parts = item.get("content", [])
+                if not isinstance(parts, list):
+                    continue
+                for content in parts:
                     if isinstance(content, dict) and content.get("type") in {"text", "output_text"} and isinstance(content.get("text"), str):
                         if content["text"].strip():
                             return content["text"].strip()
         raise ValueError("Gemini response did not contain text")
+
+    @staticmethod
+    def _gemini_http_error(error: urllib.error.HTTPError) -> GeminiRequestError:
+        # Read only bounded metadata for classification. Never return or log
+        # provider messages: they can echo a key, prompt or private transcript.
+        reasons: set[str] = set()
+        message = ""
+        try:
+            payload = json.loads(error.read(65_536).decode("utf-8"))
+            if isinstance(payload, list):
+                payload = payload[0] if payload else {}
+            detail = payload.get("error", {}) if isinstance(payload, dict) else {}
+            if isinstance(detail, dict):
+                message = str(detail.get("message", "")).lower()
+                reasons.add(str(detail.get("status", "")))
+                entries = detail.get("details", [])
+                if isinstance(entries, list):
+                    reasons.update(str(item.get("reason", "")) for item in entries if isinstance(item, dict))
+        except (OSError, ValueError):
+            pass
+        finally:
+            error.close()
+        invalid_key = reasons & {"API_KEY_INVALID", "API_KEY_EXPIRED", "API_KEY_NOT_FOUND", "API_KEY_LEAKED", "CREDENTIALS_MISSING"}
+        if error.code == 401 or invalid_key or any(phrase in message for phrase in ("api key not valid", "api key expired", "api key was reported as leaked")):
+            return GeminiRequestError("gemini_invalid_key", "Google rejected this Gemini API key. Check or replace it in Google AI Studio, then add it again in Session settings.")
+        if error.code == 402 or "BILLING_DISABLED" in reasons:
+            return GeminiRequestError("gemini_billing_required", "Google requires billing or available credits for this Gemini project. Check the project's billing status in Google AI Studio.")
+        if error.code == 403:
+            return GeminiRequestError("gemini_permission_denied", "Google denied access for this Gemini key. Check the key's API restrictions and its project's Gemini API access in Google AI Studio.")
+        if error.code == 429:
+            return GeminiRequestError("gemini_quota_exceeded", "This Gemini project's rate limit or quota has been reached. Check its usage in Google AI Studio; try again after the limit resets or use a project with available quota.")
+        if error.code == 404:
+            return GeminiRequestError("gemini_model_unavailable", "The configured Gemini model is unavailable for this project. Ask the app administrator to check model access and configuration.")
+        if error.code in {408, 504}:
+            return GeminiRequestError("gemini_timeout", "Gemini took too long to answer. Try the question again in a moment.")
+        if error.code >= 500:
+            return GeminiRequestError("gemini_provider_unavailable", "Google's Gemini service is temporarily unavailable. Please try again shortly.")
+        return GeminiRequestError("gemini_request_rejected", "Google rejected the Gemini request. Ask the app administrator to check the model, request format and project eligibility.")
 
     def _gemini_interaction_text(self, api_key: str, input_items: list[dict[str, Any]]) -> str:
         payload = json.dumps({"model": GEMINI_MODEL, "store": False, "input": input_items}).encode("utf-8")
@@ -1503,11 +1577,22 @@ class LearnWithAIApp:
             headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "User-Agent": "LearnWithAI/1.0"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310: configured provider base; BYOK stays in header
-            response_data = json.loads(response.read().decode("utf-8"))
-        if not isinstance(response_data, dict):
-            raise ValueError("Invalid Gemini response")
-        return self._extract_gemini_text(response_data)
+        try:
+            with urllib.request.urlopen(request, timeout=GEMINI_REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310: fixed Google endpoint; key stays in header
+                response_data = json.loads(response.read().decode("utf-8"))
+            if not isinstance(response_data, dict):
+                raise ValueError("Invalid Gemini response")
+            return self._extract_gemini_text(response_data)
+        except urllib.error.HTTPError as error:
+            raise self._gemini_http_error(error) from None
+        except (TimeoutError, urllib.error.URLError) as error:
+            if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
+                raise GeminiRequestError("gemini_timeout", "Gemini took too long to answer. Try the question again in a moment.") from None
+            raise GeminiRequestError("gemini_network_error", "The app server could not connect to Google Gemini. Check the server's internet connection, proxy or firewall, then try again.") from None
+        except OSError:
+            raise GeminiRequestError("gemini_network_error", "The connection to Google Gemini was interrupted. Please try again.") from None
+        except (ValueError, KeyError):
+            raise GeminiRequestError("gemini_invalid_response", "Gemini did not return a complete text answer. Try rephrasing your question; if this continues, contact the app administrator.") from None
 
     def streamable_video(self, lesson_id: int, user: dict[str, Any]) -> tuple[Path, str]:
         """Return only an authorized uploaded lesson video, never a caller-provided path."""
@@ -1581,10 +1666,12 @@ class LearnWithAIApp:
         try:
             reply = self._gemini_interaction_text(api_key, [{"type": "text", "text": prompt}])
             return {"reply": reply[:5000], "mode": "ai", "context": context}
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
+        except GeminiRequestError as error:
+            logging.getLogger("learnwithai.gemini").warning("Gemini request failed: %s", error.code)
             return {
-                "reply": "The Gemini learning assistant is temporarily unavailable. Please try again shortly.",
+                "reply": error.public_message,
                 "mode": "ai_unavailable",
+                "error_code": error.code,
                 "context": context,
             }
 

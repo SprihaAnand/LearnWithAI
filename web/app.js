@@ -105,13 +105,13 @@
     const configured = Boolean(state.user && state.geminiConfigured);
     const tutorStatus = $("#geminiTutorStatus");
     if (tutorStatus) {
-      tutorStatus.textContent = configured ? "Gemini connected for this session" : "Gemini session not connected";
+      tutorStatus.textContent = configured ? "Gemini key saved for this session" : "No Gemini key saved";
       tutorStatus.classList.toggle("is-connected", configured);
     }
     const settingsStatus = $("#geminiKeyStatus");
     if (settingsStatus) settingsStatus.textContent = configured
-      ? "Gemini is connected for transcript-grounded learner Q&A in this signed-in session. You can remove the key at any time."
-      : "No Gemini key is connected for this session.";
+      ? "Gemini key saved for this session. Your next question will check access to Gemini. You can remove the key at any time."
+      : "No Gemini key is saved for this session.";
     const removeButton = $("#removeGeminiKey");
     if (removeButton) removeButton.disabled = !configured;
     if ($("#lessonVideoFile")) syncMediaSourceControls();
@@ -166,12 +166,12 @@
     const submit = $("#geminiKeyForm button[type='submit']");
     try {
       submit.disabled = true;
-      $("#geminiKeyStatus").textContent = "Connecting Gemini for transcript-grounded Q&A…";
+      $("#geminiKeyStatus").textContent = "Saving your Gemini key for this session…";
       await api("/api/session/gemini-key", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) });
       input.value = "";
       state.geminiConfigured = true;
       renderGeminiStatus();
-      toast("Gemini is ready for transcript-grounded learner Q&A.", "success");
+      toast("Gemini key saved. Ask a lesson question to check access.", "success");
     } catch (error) {
       $("#geminiKeyStatus").textContent = error.message;
       toast(error.message, "error");

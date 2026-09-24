@@ -32,6 +32,26 @@ Use a restricted Gemini key and keep an eye on its quota and billing. Google
 explains the current key types and restrictions in its
 [API-key guidance](https://ai.google.dev/gemini-api/docs/api-key).
 
+### Troubleshooting Gemini access
+
+**Key saved** means the key was added to your session, not that Gemini has
+verified it. The next lesson question makes that check. The assistant gives a
+specific message when Gemini rejects a key, denies permission, exhausts quota,
+cannot be reached, or returns no usable answer.
+
+- For an invalid key, replace it through **Gemini session settings**.
+- For permission or model-access errors, check the key's project and API
+  restrictions in Google AI Studio; administrators should also check the
+  server's configured model.
+- For quota errors, review the project's available quota and billing before
+  retrying.
+- For network failures, check the server's connection to Gemini. A request
+  timeout defaults to 60 seconds; retry after a temporary interruption.
+- For an empty response, try a more specific question about the transcript.
+
+Restarting LearnWithAI clears saved Gemini keys. Add the key again through the
+app after a restart. Keep keys out of source files, logs, and support messages.
+
 ## Adding a lesson video
 
 An administrator can publish a first lesson using either:

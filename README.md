@@ -102,6 +102,13 @@ does not support an answer, it says so. A Gemini key never controls automatic
 transcription. See [the Gemini and video workflow](docs/GEMINI_VIDEO_WORKFLOW.md)
 for the detailed data flow and operating guidance.
 
+Saving a Gemini key confirms it was added to your session; Gemini checks access
+when you ask a question. The assistant distinguishes invalid keys, permission
+problems, exhausted quota, network failures, and responses without usable text,
+with guidance for each. If a request times out, try again; the default timeout
+is 60 seconds. After a server restart, add your key again through the app's
+session settings. Never paste it into source files, logs, or support messages.
+
 The course studio displays the server's video and transcript size limits and
 checks files before creating a course. If a video exceeds the limit, compress
 or split it, or use a hosted direct video URL with your own transcript.

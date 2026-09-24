@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import os
 import socket
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import types
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -121,6 +123,16 @@ class LearnWithAIServerTests(unittest.TestCase):
             if detail["course"]["lessons"]:
                 return course["id"], detail["course"]["lessons"][0]
         self.fail("Expected one seeded course with a lesson")
+
+    def gemini_tutor_session(self) -> tuple[str, str, int]:
+        token = self.login()
+        key = "test-session-gemini-key-do-not-return"
+        status, _, result = self.request("PUT", "/api/session/gemini-key", {"api_key": key}, token=token)
+        self.assertEqual(status, 200, result)
+        course_id, lesson = self.course_with_lesson(token)
+        status, _, result = self.request("POST", f"/api/courses/{course_id}/enroll", {}, token=token)
+        self.assertEqual(status, 200, result)
+        return token, key, int(lesson["id"])
 
     def test_health_static_and_same_origin_headers(self) -> None:
         status, headers, data = self.request("GET", "/api/health")
@@ -377,6 +389,164 @@ class LearnWithAIServerTests(unittest.TestCase):
         status, _, _ = self.request("POST", "/api/auth/logout", {}, token=learner_token)
         self.assertEqual(status, 200)
         self.assertNotIn(token_hash, self.httpd.app._gemini_session_keys)
+
+    def test_gemini_rest_steps_response_reaches_the_tutor(self) -> None:
+        token, key, lesson_id = self.gemini_tutor_session()
+        response = {
+            "id": "test-interaction",
+            "object": "interaction",
+            "status": "completed",
+            "model": "gemini-3.8-flash",
+            "steps": [
+                {"type": "user_input", "content": [{"type": "text", "text": "Do not display the prompt."}]},
+                {"type": "model_output", "content": [{"type": "text", "text": "Do not display an earlier draft."}]},
+                {"type": "thought", "summary": [{"type": "text", "text": "Do not display thoughts."}]},
+                {"type": "function_result", "content": [{"type": "text", "text": "Do not display tool output."}]},
+                {
+                    "type": "model_output",
+                    "content": [
+                        {"type": "text", "text": "Practise one step at a time."},
+                        {"type": "image", "uri": "https://example.invalid/ignored.png"},
+                        {"type": "text", "text": "Review the lesson transcript."},
+                    ],
+                },
+            ],
+        }
+        with mock.patch("server.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as urlopen:
+            status, _, data = self.request(
+                "POST", "/api/tutor", {"question": "What should I practise?", "lesson_id": lesson_id}, token=token
+            )
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["mode"], "ai")
+        self.assertEqual(" ".join(data["reply"].split()), "Practise one step at a time. Review the lesson transcript.")
+        self.assertNotIn(key, json.dumps(data))
+        self.assertNotIn("Do not display", data["reply"])
+        urlopen.assert_called_once()
+        outbound = urlopen.call_args.args[0]
+        self.assertEqual(outbound.full_url, server.GEMINI_API_BASE + "/v1beta/interactions")
+        self.assertEqual(outbound.get_method(), "POST")
+        self.assertEqual(outbound.get_header("X-goog-api-key"), key)
+        self.assertNotIn(key, outbound.full_url)
+        payload = json.loads(outbound.data)
+        self.assertIs(payload["store"], False)
+        self.assertIn("LESSON_TRANSCRIPT", payload["input"][0]["text"])
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 60)
+
+    def test_gemini_existing_text_response_shapes_still_work(self) -> None:
+        token, key, lesson_id = self.gemini_tutor_session()
+        responses = [
+            {"output_text": "A compatible answer."},
+            {"outputs": [{"type": "text", "text": "A compatible answer."}]},
+            {"output": [{"content": [{"type": "output_text", "text": "A compatible answer."}]}]},
+        ]
+        for response in responses:
+            with self.subTest(shape=next(iter(response))):
+                with mock.patch("server.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
+                    status, _, data = self.request(
+                        "POST", "/api/tutor", {"question": "What does the lesson say?", "lesson_id": lesson_id}, token=token
+                    )
+                self.assertEqual(status, 200, data)
+                self.assertEqual(data["mode"], "ai")
+                self.assertEqual(data["reply"], "A compatible answer.")
+                self.assertNotIn(key, json.dumps(data))
+
+    def test_gemini_provider_errors_are_actionable_without_disclosing_private_details(self) -> None:
+        token, key, lesson_id = self.gemini_tutor_session()
+        private_detail = f"private-provider-detail-{key}"
+        invalid_key = {
+            "error": {
+                "code": 400,
+                "message": private_detail,
+                "status": "INVALID_ARGUMENT",
+                "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_INVALID"}],
+            }
+        }
+        cases = [
+            (400, invalid_key, "gemini_invalid_key"),
+            (400, [invalid_key], "gemini_invalid_key"),
+            (401, {"error": {"message": private_detail}}, "gemini_invalid_key"),
+            (403, {"error": {"message": private_detail}}, "gemini_permission_denied"),
+            (429, {"error": {"message": private_detail}}, "gemini_quota_exceeded"),
+            (404, {"error": {"message": private_detail}}, "gemini_model_unavailable"),
+            (402, {"error": {"message": private_detail}}, "gemini_billing_required"),
+            (403, {"error": {"details": [{"reason": "BILLING_DISABLED"}], "message": private_detail}}, "gemini_billing_required"),
+            (400, {"error": {"message": private_detail}}, "gemini_request_rejected"),
+            (500, {"error": {"message": private_detail}}, "gemini_provider_unavailable"),
+            (503, {"error": {"message": private_detail}}, "gemini_provider_unavailable"),
+        ]
+        for http_status, response, code in cases:
+            with self.subTest(http_status=http_status, response_shape=type(response).__name__):
+                failure = urllib.error.HTTPError(
+                    server.GEMINI_API_BASE + "/v1beta/interactions", http_status, private_detail, {},
+                    io.BytesIO(json.dumps(response).encode()),
+                )
+                with (
+                    self.assertLogs("learnwithai.gemini", level="WARNING") as captured_logs,
+                    mock.patch("server.urllib.request.urlopen", side_effect=failure),
+                ):
+                    status, _, data = self.request(
+                        "POST", "/api/tutor", {"question": "What should I practise?", "lesson_id": lesson_id}, token=token
+                    )
+                self.assertEqual(status, 200, data)
+                self.assertEqual(data["mode"], "ai_unavailable")
+                self.assertEqual(data["error_code"], code)
+                self.assertTrue(data["reply"].strip())
+                self.assertIn("context", data)
+                self.assertNotIn(key, json.dumps(data))
+                self.assertNotIn(private_detail, json.dumps(data))
+                self.assertEqual(len(captured_logs.output), 1)
+                self.assertIn(code, captured_logs.output[0])
+                self.assertNotIn(key, captured_logs.output[0])
+                self.assertNotIn(private_detail, captured_logs.output[0])
+
+    def test_gemini_transport_failures_are_distinguished_from_provider_rejection(self) -> None:
+        token, key, lesson_id = self.gemini_tutor_session()
+        private_detail = f"private-network-detail-{key}"
+        cases = [
+            (TimeoutError(private_detail), "gemini_timeout"),
+            (urllib.error.URLError(TimeoutError(private_detail)), "gemini_timeout"),
+            (urllib.error.URLError(private_detail), "gemini_network_error"),
+        ]
+        for failure, code in cases:
+            with self.subTest(code=code, error_type=type(failure).__name__):
+                with mock.patch("server.urllib.request.urlopen", side_effect=failure):
+                    status, _, data = self.request(
+                        "POST", "/api/tutor", {"question": "What should I practise?", "lesson_id": lesson_id}, token=token
+                    )
+                self.assertEqual(status, 200, data)
+                self.assertEqual(data["mode"], "ai_unavailable")
+                self.assertEqual(data["error_code"], code)
+                self.assertTrue(data["reply"].strip())
+                self.assertNotIn(key, json.dumps(data))
+                self.assertNotIn(private_detail, json.dumps(data))
+
+    def test_gemini_malformed_or_nonanswer_responses_fail_safely(self) -> None:
+        token, key, lesson_id = self.gemini_tutor_session()
+        responses = [
+            b"{invalid-json",
+            b"",
+            b"null",
+            b"[]",
+            b"{}",
+            json.dumps({"steps": None, "output_text": key}).encode(),
+            json.dumps({"steps": [], "output_text": key}).encode(),
+            json.dumps({"steps": [{"type": "model_output", "content": []}]}).encode(),
+            json.dumps({"steps": [{"type": "thought", "content": [{"type": "text", "text": key}]}]}).encode(),
+            json.dumps({"steps": [{"type": "user_input", "content": [{"type": "text", "text": key}]}]}).encode(),
+            json.dumps({"status": "failed", "output_text": key}).encode(),
+            json.dumps({"status": "in_progress", "steps": [{"type": "model_output", "content": [{"type": "text", "text": key}]}]}).encode(),
+        ]
+        for index, response in enumerate(responses):
+            with self.subTest(response_index=index):
+                with mock.patch("server.urllib.request.urlopen", return_value=io.BytesIO(response)):
+                    status, _, data = self.request(
+                        "POST", "/api/tutor", {"question": "What should I practise?", "lesson_id": lesson_id}, token=token
+                    )
+                self.assertEqual(status, 200, data)
+                self.assertEqual(data["mode"], "ai_unavailable")
+                self.assertEqual(data["error_code"], "gemini_invalid_response")
+                self.assertTrue(data["reply"].strip())
+                self.assertNotIn(key, json.dumps(data))
 
     def test_video_upload_stream_playback_ticket_and_range(self) -> None:
         admin_token = self.login("admin@learnwithai.demo")
