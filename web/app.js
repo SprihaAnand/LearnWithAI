@@ -11,6 +11,7 @@
     lesson: null,
     quiz: null,
     playback: null,
+    geminiConfigured: false,
   };
 
   const escapeHtml = (value = "") => String(value)
@@ -26,6 +27,15 @@
     return `${mins} min`;
   };
 
+  const formatClock = (seconds = 0) => {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(value / 60);
+    const remaining = String(value % 60).padStart(2, "0");
+    return `${String(minutes).padStart(2, "0")}:${remaining}`;
+  };
+
+  const hasText = (value) => typeof value === "string" && value.trim().length > 0;
+
   function toast(message, tone = "") {
     const node = document.createElement("div");
     node.className = `toast ${tone}`;
@@ -37,7 +47,8 @@
   async function api(path, options = {}) {
     const headers = { Accept: "application/json", ...(options.headers || {}) };
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
-    if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    const multipart = typeof FormData !== "undefined" && options.body instanceof FormData;
+    if (options.body && !multipart && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
     let response;
     try {
       response = await fetch(path, { ...options, headers });
@@ -77,6 +88,98 @@
       $("#headerAvatar").textContent = initials(state.user.name);
       $("#headerName").textContent = state.user.name.split(" ")[0];
       $("#dashboardName").textContent = state.user.name.split(" ")[0];
+    }
+    renderGeminiStatus();
+  }
+
+  function renderGeminiStatus() {
+    const configured = Boolean(state.user && state.geminiConfigured);
+    const tutorStatus = $("#geminiTutorStatus");
+    if (tutorStatus) {
+      tutorStatus.textContent = configured ? "Gemini connected for this session" : "Gemini session not connected";
+      tutorStatus.classList.toggle("is-connected", configured);
+    }
+    const settingsStatus = $("#geminiKeyStatus");
+    if (settingsStatus) settingsStatus.textContent = configured
+      ? "Gemini is connected for this signed-in session. You can remove the key at any time."
+      : "No Gemini key is connected for this session.";
+    const removeButton = $("#removeGeminiKey");
+    if (removeButton) removeButton.disabled = !configured;
+    if ($("#lessonVideoFile")) syncMediaSourceControls();
+  }
+
+  async function refreshGeminiStatus() {
+    if (!state.user || !state.token) {
+      state.geminiConfigured = false;
+      renderGeminiStatus();
+      return false;
+    }
+    try {
+      const data = await api("/api/session/gemini-key");
+      state.geminiConfigured = Boolean(data.configured ?? data.has_key ?? data.gemini_configured ?? data.status === "configured");
+    } catch {
+      state.geminiConfigured = false;
+    }
+    renderGeminiStatus();
+    return state.geminiConfigured;
+  }
+
+  function syncOverlay() {
+    const hasOpenPanel = $("#tutorPanel")?.classList.contains("is-open") || $("#geminiPanel")?.classList.contains("is-open");
+    $("#overlay")?.classList.toggle("is-visible", Boolean(hasOpenPanel));
+  }
+
+  async function openGeminiSettings() {
+    if (!state.user) return setAuthMode("login");
+    closeTutor();
+    $("#profileMenu")?.classList.add("is-hidden");
+    $("#geminiPanel")?.classList.add("is-open");
+    $("#geminiPanel")?.setAttribute("aria-hidden", "false");
+    syncOverlay();
+    await refreshGeminiStatus();
+    window.setTimeout(() => $("#geminiApiKey")?.focus(), 120);
+  }
+
+  function closeGeminiSettings() {
+    $("#geminiPanel")?.classList.remove("is-open");
+    $("#geminiPanel")?.setAttribute("aria-hidden", "true");
+    const input = $("#geminiApiKey");
+    if (input) input.value = "";
+    syncOverlay();
+  }
+
+  async function saveGeminiKey(event) {
+    event.preventDefault();
+    if (!state.user) return setAuthMode("login");
+    const input = $("#geminiApiKey");
+    const apiKey = input?.value.trim();
+    if (!apiKey) return toast("Paste a Gemini API key to continue.", "error");
+    const submit = $("#geminiKeyForm button[type='submit']");
+    try {
+      submit.disabled = true;
+      $("#geminiKeyStatus").textContent = "Connecting Gemini for this session…";
+      await api("/api/session/gemini-key", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) });
+      input.value = "";
+      state.geminiConfigured = true;
+      renderGeminiStatus();
+      toast("Gemini is ready for this session.", "success");
+    } catch (error) {
+      $("#geminiKeyStatus").textContent = error.message;
+      toast(error.message, "error");
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async function removeGeminiKey() {
+    if (!state.user || !state.geminiConfigured) return;
+    try {
+      await api("/api/session/gemini-key", { method: "DELETE" });
+      state.geminiConfigured = false;
+      renderGeminiStatus();
+      toast("Your Gemini key was removed from this session.");
+    } catch (error) {
+      toast(error.message, "error");
     }
   }
 
@@ -168,22 +271,226 @@
     } catch (error) { toast(error.message, "error"); }
   }
 
+  function lessonVideoSource(lesson) {
+    const storedUrl = String(lesson?.video_url || "").trim();
+    if (!storedUrl) return "";
+    if (/^https?:\/\//i.test(storedUrl)) return storedUrl;
+    return `/api/lessons/${lesson.id}/stream`;
+  }
+
+  function isHostedLessonVideo(lesson) {
+    return /^https?:\/\//i.test(String(lesson?.video_url || "").trim());
+  }
+
+  function transcriptSummary(lesson) {
+    const status = String(lesson?.transcription_status || "").toLowerCase();
+    const failure = String(lesson?.transcription_error || "").trim();
+    if (lesson?.transcript_access === false) {
+      return {
+        tone: "missing",
+        availability: "Enroll to unlock the transcript",
+        label: "Transcript available after enrollment",
+        detail: "Enroll in this course to read its transcript and use Gemini for lesson-grounded questions.",
+        button: "Enroll to unlock",
+      };
+    }
+    if (hasText(lesson?.transcript)) {
+      return {
+        tone: "ready",
+        availability: "Transcript ready · Gemini can use it",
+        label: "Transcript ready",
+        detail: "Gemini can use this lesson’s transcript to answer questions with lesson context.",
+        button: "Read transcript",
+      };
+    }
+    if (failure || /fail|error/.test(status)) {
+      return {
+        tone: "error",
+        availability: "Transcript needs attention",
+        label: "Transcript unavailable",
+        detail: failure || "The transcript could not be prepared. Upload a transcript file or try automatic transcription again.",
+        button: "Transcript status",
+      };
+    }
+    if (/queue|process|transcrib|pending|running/.test(status)) {
+      return {
+        tone: "processing",
+        availability: "Transcript is being prepared",
+        label: "Transcription in progress",
+        detail: "Gemini will use this lesson’s transcript as soon as automatic transcription finishes.",
+        button: "Transcript processing",
+      };
+    }
+    return {
+      tone: "missing",
+      availability: "No transcript yet",
+      label: "Transcript not added",
+      detail: "This lesson does not have a transcript yet, so Gemini cannot ground answers in this lesson’s content.",
+      button: "Transcript status",
+    };
+  }
+
+  function updatePlaybackUi(currentSeconds, totalSeconds) {
+    const total = Number(totalSeconds) || Number(state.lesson?.duration_seconds) || 0;
+    const current = Math.max(0, Number(currentSeconds) || 0);
+    const percent = total ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : 0;
+    $("#timelineFill").style.width = `${percent}%`;
+    $("#videoTimeline").setAttribute("aria-valuenow", String(percent));
+    $("#videoTime").textContent = `${formatClock(current)} / ${formatClock(total)}`;
+    if (state.lesson) {
+      state.lesson.progress = { ...(state.lesson.progress || {}), progress_percent: percent };
+    }
+    return percent;
+  }
+
+  function renderTranscript(lesson) {
+    const summary = transcriptSummary(lesson);
+    $("#transcriptText").textContent = hasText(lesson.transcript) ? lesson.transcript : "There is no transcript text to show yet.";
+    $("#transcriptStatus").textContent = summary.label;
+    $("#transcriptStatus").className = `transcript-status ${summary.tone}`;
+    $("#transcriptDetail").textContent = summary.detail;
+    $("#transcriptAvailability").textContent = summary.availability;
+    $("#transcriptAvailability").className = `transcript-availability ${summary.tone}`;
+    $("#transcriptButtonLabel").textContent = summary.button;
+    const context = $("#tutorContextText");
+    const tutorInput = $("#tutorInput");
+    if (context) context.textContent = lesson.transcript_access === false
+      ? "Enroll in this course to use its transcript with the Gemini learning assistant."
+      : hasText(lesson.transcript)
+      ? `Ask about “${lesson.title}”. Gemini will use this lesson’s transcript to keep its answer in context.`
+      : summary.tone === "processing"
+        ? "This lesson’s transcript is still being prepared. Ask again once it is ready so Gemini can answer from the lesson content."
+        : "No lesson transcript is ready yet. Add one so Gemini can answer questions using this lesson’s content.";
+    if (tutorInput) tutorInput.placeholder = lesson.transcript_access === false
+      ? "Enroll to unlock lesson questions…"
+      : hasText(lesson.transcript) ? "Ask about this lesson’s transcript…" : "Ask a learning question…";
+  }
+
+  async function configureVideo(lesson) {
+    const player = $("#lessonVideo");
+    const frame = $("#videoFrame");
+    const emptyState = $("#videoEmpty");
+    const source = lessonVideoSource(lesson);
+    const hasVideo = Boolean(source);
+    const isHosted = isHostedLessonVideo(lesson);
+    const lessonId = String(lesson.id);
+    window.clearInterval(state.playback);
+    if (player) {
+      player.onloadedmetadata = null;
+      player.ontimeupdate = null;
+      player.onplay = null;
+      player.onpause = null;
+      player.onended = null;
+      player.onerror = null;
+      player.pause();
+      player.dataset.lessonId = lessonId;
+    }
+    frame?.classList.toggle("has-video", hasVideo);
+    frame?.classList.remove("is-playing");
+    emptyState?.classList.toggle("is-hidden", hasVideo);
+    player?.classList.toggle("is-hidden", !hasVideo);
+    $("#videoPlayControl").disabled = !hasVideo;
+    $("#playLessonButton").disabled = !hasVideo;
+    $("#speedToggle").textContent = "1×";
+    if (player) player.playbackRate = 1;
+    if (!hasVideo) {
+      if (player) {
+        player.removeAttribute("src");
+        player.dataset.source = "";
+        player.load();
+      }
+      $("#videoSourceNotice").textContent = "No playable video has been added yet.";
+      updatePlaybackUi(0, lesson.duration_seconds);
+      return;
+    }
+    const savedPercent = Math.max(0, Math.min(100, Number(lesson.progress?.progress_percent) || 0));
+    updatePlaybackUi((Number(lesson.duration_seconds) || 0) * savedPercent / 100, lesson.duration_seconds);
+    if (!player) return;
+    player.onloadedmetadata = () => {
+      const total = Number.isFinite(player.duration) ? player.duration : lesson.duration_seconds;
+      if (savedPercent > 0 && player.currentTime < 0.5 && total) player.currentTime = total * savedPercent / 100;
+      updatePlaybackUi(player.currentTime, total);
+    };
+    player.ontimeupdate = () => updatePlaybackUi(player.currentTime, player.duration || lesson.duration_seconds);
+    player.onplay = () => {
+      frame?.classList.add("is-playing");
+      $("#videoStatus").textContent = "Learning in progress…";
+      $("#videoPlayControl").textContent = "❚❚";
+      $("#playLessonButton").setAttribute("aria-label", "Pause lesson");
+    };
+    player.onpause = () => {
+      frame?.classList.remove("is-playing");
+      $("#videoPlayControl").textContent = "▶";
+      $("#playLessonButton").setAttribute("aria-label", "Play lesson");
+      if (!player.ended && state.course?.enrolled && player.currentTime > 0) saveProgress(updatePlaybackUi(player.currentTime, player.duration || lesson.duration_seconds));
+    };
+    player.onended = () => {
+      frame?.classList.remove("is-playing");
+      $("#videoStatus").textContent = "Lesson complete";
+      $("#videoPlayControl").textContent = "▶";
+      saveProgress(100);
+    };
+    player.onerror = () => {
+      $("#videoStatus").textContent = "This video could not be played here.";
+      $("#videoSourceNotice").textContent = isHosted ? "Check that the hosted URL is a direct, browser-playable video file." : "Your secure video session expired. Reopen the lesson and try again.";
+    };
+
+    const assignSource = () => {
+      if (state.lesson?.id !== lesson.id || player.dataset.lessonId !== lessonId) return;
+      player.dataset.source = source;
+      player.src = source;
+      player.load();
+      $("#videoPlayControl").disabled = false;
+      $("#playLessonButton").disabled = false;
+      $("#videoSourceNotice").textContent = isHosted ? "Hosted video" : "Secure uploaded video";
+      $("#videoStatus").textContent = lesson.progress?.completed ? "Lesson complete" : "Ready when you are";
+    };
+
+    if (isHosted) {
+      assignSource();
+      return;
+    }
+    const canUseSecurePlayback = Boolean(state.course?.enrolled || state.user?.role === "admin");
+    if (!state.user || !canUseSecurePlayback) {
+      player.removeAttribute("src");
+      player.dataset.source = "";
+      player.load();
+      $("#videoPlayControl").disabled = true;
+      $("#playLessonButton").disabled = true;
+      $("#videoStatus").textContent = "Enroll to securely play this lesson";
+      $("#videoSourceNotice").textContent = "A short-lived secure playback session is created after enrolment.";
+      return;
+    }
+    player.removeAttribute("src");
+    player.dataset.source = "";
+    player.load();
+    $("#videoPlayControl").disabled = true;
+    $("#playLessonButton").disabled = true;
+    $("#videoStatus").textContent = "Preparing secure playback…";
+    $("#videoSourceNotice").textContent = "Creating a short-lived playback session…";
+    try {
+      await api(`/api/lessons/${lesson.id}/playback-ticket`);
+      assignSource();
+    } catch (error) {
+      if (state.lesson?.id !== lesson.id || player.dataset.lessonId !== lessonId) return;
+      $("#videoStatus").textContent = "Secure playback could not be prepared.";
+      $("#videoSourceNotice").textContent = error.message;
+    }
+  }
+
   function renderLesson() {
     const lesson = state.lesson;
     if (!lesson) return;
     $("#lessonTitle").textContent = lesson.title;
     $("#lessonHeading").textContent = lesson.title;
     $("#lessonDescription").textContent = lesson.description || "Learn at your own pace, then try the reflection below.";
-    $("#transcriptText").textContent = lesson.transcript || "A transcript will be available for this lesson.";
-    $("#videoTime").textContent = `00:00 / ${String(Math.floor((lesson.duration_seconds || 0) / 60)).padStart(2, "0")}:${String((lesson.duration_seconds || 0) % 60).padStart(2, "0")}`;
-    const percent = Math.round(lesson.progress?.progress_percent || 0);
-    $("#timelineFill").style.width = `${percent}%`;
-    $("#videoTimeline").setAttribute("aria-valuenow", String(percent));
     $("#videoStatus").textContent = lesson.progress?.completed ? "Lesson complete" : (state.course?.enrolled ? "Ready when you are" : "Enroll to start this lesson");
     $("#completeLessonButton").textContent = lesson.progress?.completed ? "Completed ✓" : "Mark lesson complete ✓";
     $("#completeLessonButton").onclick = () => saveProgress(100);
     $("#playLessonButton").onclick = () => playLesson();
     $("#videoPlayControl").onclick = () => playLesson();
+    renderTranscript(lesson);
+    configureVideo(lesson);
     if (lesson.quiz_id) loadQuiz(lesson.quiz_id); else $("#lessonQuiz").classList.add("is-hidden");
   }
 
@@ -210,19 +517,46 @@
     } catch (error) { toast(error.message, "error"); }
   }
 
-  function playLesson() {
+  async function playLesson() {
     if (!state.user) return setAuthMode("login");
-    if (!state.course?.enrolled) return enrollCourse(state.course.id);
-    window.clearInterval(state.playback);
-    let value = Number(state.lesson.progress?.progress_percent || 0);
-    $("#videoStatus").textContent = "Learning in progress…";
-    $("#playLessonButton").classList.add("is-playing");
-    state.playback = window.setInterval(() => {
-      value = Math.min(100, value + 2);
-      $("#timelineFill").style.width = `${value}%`;
-      $("#videoTimeline").setAttribute("aria-valuenow", String(value));
-      if (value >= 100) { window.clearInterval(state.playback); saveProgress(100); }
-    }, 280);
+    if (!state.course?.enrolled && state.user?.role !== "admin") return enrollCourse(state.course.id);
+    const player = $("#lessonVideo");
+    if (!player || !lessonVideoSource(state.lesson)) return toast("This lesson does not have a playable video yet.", "error");
+    try {
+      if (player.paused) await player.play(); else player.pause();
+    } catch {
+      toast("Your browser could not start this video. Check the hosted video URL and try again.", "error");
+    }
+  }
+
+  function seekLesson(event) {
+    if (!state.user) return setAuthMode("login");
+    if (!state.course?.enrolled && state.user?.role !== "admin") return enrollCourse(state.course.id);
+    const player = $("#lessonVideo");
+    if (!player || !Number.isFinite(player.duration) || player.duration <= 0) return;
+    const timeline = $("#videoTimeline");
+    const bounds = timeline.getBoundingClientRect();
+    const position = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    player.currentTime = player.duration * position;
+    updatePlaybackUi(player.currentTime, player.duration);
+  }
+
+  function nudgeLessonPosition(direction) {
+    const player = $("#lessonVideo");
+    if (!player || !Number.isFinite(player.duration) || player.duration <= 0) return;
+    const next = Math.max(0, Math.min(player.duration, player.currentTime + direction * 5));
+    player.currentTime = next;
+    updatePlaybackUi(next, player.duration);
+  }
+
+  function cyclePlaybackSpeed() {
+    const player = $("#lessonVideo");
+    if (!player || !lessonVideoSource(state.lesson)) return toast("Start a lesson video to change playback speed.", "error");
+    const speeds = [1, 1.25, 1.5, 2];
+    const currentIndex = speeds.findIndex((speed) => Math.abs(speed - player.playbackRate) < 0.01);
+    const next = speeds[(currentIndex + 1) % speeds.length];
+    player.playbackRate = next;
+    $("#speedToggle").textContent = `${next}×`;
   }
 
   async function loadQuiz(id) {
@@ -252,18 +586,20 @@
     } catch (error) { toast(error.message, "error"); }
   }
 
-  function openTutor() {
+  async function openTutor() {
     if (!state.user) return setAuthMode("login");
+    closeGeminiSettings();
     $("#tutorPanel").classList.add("is-open");
     $("#tutorPanel").setAttribute("aria-hidden", "false");
-    $("#overlay").classList.add("is-visible");
+    syncOverlay();
+    await refreshGeminiStatus();
     $("#tutorInput")?.focus();
   }
 
   function closeTutor() {
     $("#tutorPanel").classList.remove("is-open");
     $("#tutorPanel").setAttribute("aria-hidden", "true");
-    $("#overlay").classList.remove("is-visible");
+    syncOverlay();
   }
 
   async function askTutor(question) {
@@ -271,9 +607,19 @@
     if (!clean) return;
     const messages = $("#tutorMessages");
     messages.insertAdjacentHTML("beforeend", `<div class="message message-user"><p>${escapeHtml(clean)}</p></div>`);
+    if (!state.geminiConfigured) {
+      messages.insertAdjacentHTML("beforeend", `<div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Add a Gemini API key in Session settings first. The key is used only for this signed-in session.</p></div>`);
+      messages.scrollTop = messages.scrollHeight;
+      return;
+    }
+    if (!state.lesson || !hasText(state.lesson.transcript)) {
+      messages.insertAdjacentHTML("beforeend", `<div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Open a lesson with a ready transcript first. Gemini only answers from the selected lesson’s transcript so its response stays grounded in the course content.</p></div>`);
+      messages.scrollTop = messages.scrollHeight;
+      return;
+    }
     const waiting = document.createElement("div");
     waiting.className = "message message-bot is-waiting";
-    waiting.textContent = "Thinking with you…";
+    waiting.textContent = "Reading the lesson transcript…";
     messages.append(waiting); messages.scrollTop = messages.scrollHeight;
     try {
       const data = await api("/api/tutor", { method: "POST", body: JSON.stringify({ question: clean, course_id: state.course?.id, lesson_id: state.lesson?.id }) });
@@ -286,13 +632,54 @@
     const data = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
     state.token = data.token; state.user = data.user;
     localStorage.setItem("learnwithai_token", state.token);
-    updateChrome(); await loadCourses(); setView("dashboard"); toast(`Welcome back, ${state.user.name.split(" ")[0]}!`);
+    updateChrome(); await refreshGeminiStatus(); await loadCourses(); setView("dashboard"); toast(`Welcome back, ${state.user.name.split(" ")[0]}!`);
   }
 
   async function signOut() {
+    try { if (state.token) await api("/api/session/gemini-key", { method: "DELETE" }); } catch { /* session expiry still clears the key */ }
     try { if (state.token) await api("/api/auth/logout", { method: "POST" }); } catch { /* local sign-out still succeeds */ }
-    window.clearInterval(state.playback); state.token = ""; state.user = null; state.course = null; state.lesson = null;
+    window.clearInterval(state.playback); state.token = ""; state.user = null; state.course = null; state.lesson = null; state.geminiConfigured = false;
     localStorage.removeItem("learnwithai_token"); updateChrome(); await loadCourses(); setView("home"); toast("You’ve been signed out.");
+  }
+
+  function isHostedVideoUrl(value) {
+    try {
+      const url = new URL(String(value || "").trim());
+      return url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function isTranscriptFile(file) {
+    return file instanceof File && file.size > 0 && /\.(txt|srt|vtt)$/i.test(file.name || "");
+  }
+
+  function transcriptTextFromFile(rawText) {
+    return String(rawText || "")
+      .replace(/^\uFEFF?WEBVTT[^\n]*\n?/i, "")
+      .replace(/^\d+\s*$/gm, "")
+      .replace(/^\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->\s+\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}.*$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  async function readHostedTranscript(file) {
+    if (!isTranscriptFile(file)) throw new Error("Choose a .txt, .srt, or .vtt transcript file.");
+    if (file.size > 5 * 1024 * 1024) throw new Error("Transcript files must be 5 MB or smaller.");
+    const transcript = transcriptTextFromFile(await file.text());
+    if (!transcript) throw new Error("That transcript file does not contain readable text.");
+    if (transcript.length > 200000) throw new Error("The usable transcript must be 200,000 characters or fewer.");
+    return transcript;
+  }
+
+  function setPublishingState(publishing, message = "") {
+    const publishButton = $("#publishCourseButton");
+    if (publishButton) {
+      publishButton.disabled = publishing;
+      publishButton.innerHTML = publishing ? "Publishing…" : "Publish course <span aria-hidden=\"true\">→</span>";
+    }
+    if (message) $("#courseSaveStatus").textContent = message;
   }
 
   async function createCourse(event) {
@@ -301,21 +688,104 @@
     if (!formElement) return;
     const form = new FormData(formElement);
     const description = String(form.get("description") || "").trim();
-    const payload = { title: form.get("title"), summary: description.slice(0, 280), description: description.length >= 20 ? description : `${description} This course gives learners a clear practical starting point.`, category: form.get("topic"), published: true };
+    const videoFile = form.get("videoFile");
+    const hasVideoFile = videoFile instanceof File && videoFile.size > 0;
+    const hostedUrl = String(form.get("videoUrl") || "").trim();
+    const transcriptMode = String(form.get("transcriptionMode") || "none");
+    const transcriptFile = form.get("transcriptFile");
+    const payload = {
+      title: form.get("title"),
+      summary: description.slice(0, 280),
+      description: description.length >= 20 ? description : `${description} This course gives learners a clear practical starting point.`,
+      category: form.get("topic"),
+      published: true,
+    };
     try {
+      if (!hasVideoFile && !hostedUrl) throw new Error("Add a video file or a hosted direct video URL before publishing this lesson.");
+      if (hasVideoFile && hostedUrl) throw new Error("Choose either a video file or a hosted direct URL, not both.");
+      if (hasVideoFile && !String(videoFile.type || "").startsWith("video/")) throw new Error("Choose a browser-ready video file.");
+      if (hostedUrl && !isHostedVideoUrl(hostedUrl)) throw new Error("Use a direct HTTPS URL for the hosted video.");
+      if (transcriptMode === "auto" && !hasVideoFile) throw new Error("Automatic Gemini transcription needs a video file uploaded to LearnWithAI. For a hosted video, upload your transcript instead.");
+      if (transcriptMode === "upload" && !isTranscriptFile(transcriptFile)) throw new Error("Choose a .txt, .srt, or .vtt transcript file.");
+      if (transcriptMode === "auto" && !await refreshGeminiStatus()) {
+        openGeminiSettings();
+        throw new Error("Add a Gemini API key for this session before starting automatic transcription.");
+      }
+      const hostedTranscript = transcriptMode === "upload" && !hasVideoFile ? await readHostedTranscript(transcriptFile) : "";
+      setPublishingState(true, hasVideoFile ? "Creating course and uploading video…" : "Creating course…");
       const { course } = await api("/api/admin/courses", { method: "POST", body: JSON.stringify(payload) });
       const minutes = Math.max(1, Math.min(1440, Number.parseInt(String(form.get("duration") || ""), 10) || 10));
-      await api(`/api/courses/${course.id}/lessons`, { method: "POST", body: JSON.stringify({
+      const lessonResponse = await api(`/api/courses/${course.id}/lessons`, { method: "POST", body: JSON.stringify({
         title: form.get("firstLesson"),
         description: payload.description,
-        video_url: String(form.get("videoUrl") || "").trim() || null,
+        video_url: hostedUrl || null,
         duration_seconds: minutes * 60,
         position: 1,
-        transcript: "",
+        transcript: hostedTranscript,
       }) });
-      $("#courseSaveStatus").textContent = `Published “${course.title}” with its first lesson.`;
-      formElement.reset(); await loadCourses(); toast("Course published.");
-    } catch (error) { $("#courseSaveStatus").textContent = error.message; }
+      const lesson = lessonResponse.lesson;
+      if (hasVideoFile) {
+        const uploadData = new FormData();
+        uploadData.append("video", videoFile);
+        uploadData.append("transcription_mode", transcriptMode);
+        if (transcriptMode === "upload") uploadData.append("transcript_file", transcriptFile);
+        setPublishingState(true, transcriptMode === "auto" ? "Uploading video and starting Gemini transcription…" : "Uploading lesson video…");
+        await api(`/api/lessons/${lesson.id}/video`, { method: "POST", body: uploadData });
+      }
+      const transcriptMessage = transcriptMode === "auto" ? " Gemini is preparing the transcript." : transcriptMode === "upload" ? " The transcript is ready for Gemini." : " Add a transcript later to enable grounded Gemini answers.";
+      $("#courseSaveStatus").textContent = `Published “${course.title}” with its first lesson.${transcriptMessage}`;
+      formElement.reset();
+      syncMediaSourceControls();
+      await loadCourses();
+      toast("Course published.", "success");
+    } catch (error) {
+      $("#courseSaveStatus").textContent = error.message;
+      toast(error.message, "error");
+    } finally {
+      setPublishingState(false);
+    }
+  }
+
+  function fileLabel(file, fallback) {
+    if (!(file instanceof File) || !file.size) return fallback;
+    const size = file.size >= 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.ceil(file.size / 1024)} KB`;
+    return `${file.name} · ${size}`;
+  }
+
+  function syncMediaSourceControls() {
+    const videoFileInput = $("#lessonVideoFile");
+    const videoUrlInput = $("#lessonVideoUrl");
+    const transcriptInput = $("#lessonTranscriptFile");
+    if (!videoFileInput || !videoUrlInput || !transcriptInput) return;
+    const videoFile = videoFileInput.files?.[0];
+    const hostedUrl = videoUrlInput.value.trim();
+    const hasVideoFile = Boolean(videoFile?.size);
+    const hasHostedUrl = Boolean(hostedUrl);
+    const autoOption = $("input[name='transcriptionMode'][value='auto']");
+    const uploadOption = $("input[name='transcriptionMode'][value='upload']");
+    const noneOption = $("input[name='transcriptionMode'][value='none']");
+    const autoRequiresUpload = hasHostedUrl && !hasVideoFile;
+    autoOption.disabled = autoRequiresUpload;
+    autoOption.closest(".transcription-choice")?.classList.toggle("is-disabled", autoRequiresUpload);
+    if (autoRequiresUpload && autoOption.checked) (transcriptInput.files?.[0]?.size ? uploadOption : noneOption).checked = true;
+    const activeMode = $("input[name='transcriptionMode']:checked")?.value || "none";
+    transcriptInput.disabled = activeMode !== "upload";
+    $("#transcriptFileField")?.classList.toggle("is-hidden", activeMode !== "upload");
+    $("#videoFileName").textContent = fileLabel(videoFile, "MP4, WebM, or another browser-ready video");
+    $("#transcriptFileName").textContent = fileLabel(transcriptInput.files?.[0], "Choose a text, SRT, or VTT file.");
+    const hint = $("#mediaSourceHint");
+    if (!hint) return;
+    if (hasVideoFile) {
+      hint.textContent = activeMode === "auto" && !state.geminiConfigured
+        ? "Your video will upload here. Add a Gemini key for this session before automatic transcription."
+        : "Your video will upload to LearnWithAI. Learners will stream it from the course page.";
+    } else if (hasHostedUrl) {
+      hint.textContent = activeMode === "upload"
+        ? "The hosted video will use the transcript you upload with this course."
+        : "Hosted videos need a transcript file for Gemini-grounded lesson answers.";
+    } else {
+      hint.textContent = "Choose a video source to enable the matching transcript options.";
+    }
   }
 
   function filterCourses() {
@@ -338,20 +808,37 @@
     $$('[data-auth-mode]').forEach((element) => element.addEventListener("click", () => setAuthMode(element.dataset.authMode)));
     $$('[data-demo]').forEach((element) => element.addEventListener("click", () => signIn(element.dataset.demo === "admin" ? "admin@learnwithai.demo" : "learner@learnwithai.demo", "DemoPass123!").catch((error) => toast(error.message, "error"))));
     $("#loginForm")?.addEventListener("submit", (event) => { event.preventDefault(); const data = new FormData(event.currentTarget); signIn(data.get("email"), data.get("password")).catch((error) => toast(error.message, "error")); });
-    $("#registerForm")?.addEventListener("submit", async (event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (!data.get("terms")) return toast("Please accept the community guidelines to continue.", "error"); try { const response = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ name: data.get("name"), email: data.get("email"), password: data.get("password") }) }); state.token = response.token; state.user = response.user; localStorage.setItem("learnwithai_token", state.token); updateChrome(); await loadCourses(); setView("dashboard"); toast("Your account is ready."); } catch (error) { toast(error.message, "error"); } });
+    $("#registerForm")?.addEventListener("submit", async (event) => { event.preventDefault(); const data = new FormData(event.currentTarget); if (!data.get("terms")) return toast("Please accept the community guidelines to continue.", "error"); try { const response = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ name: data.get("name"), email: data.get("email"), password: data.get("password") }) }); state.token = response.token; state.user = response.user; localStorage.setItem("learnwithai_token", state.token); updateChrome(); await refreshGeminiStatus(); await loadCourses(); setView("dashboard"); toast("Your account is ready."); } catch (error) { toast(error.message, "error"); } });
     $$(".password-toggle").forEach((button) => button.addEventListener("click", () => { const input = $("input", button.parentElement); const show = input.type === "password"; input.type = show ? "text" : "password"; button.textContent = show ? "Hide" : "Show"; }));
     $("#profileButton")?.addEventListener("click", () => $("#profileMenu")?.classList.toggle("is-hidden"));
     ["#signOutButton", "#sideSignOut", "#adminSignOut"].forEach((selector) => $(selector)?.addEventListener("click", signOut));
     $("#menuToggle")?.addEventListener("click", () => { const open = $("#mainNav").classList.toggle("is-open"); $("#menuToggle").setAttribute("aria-expanded", String(open)); });
+    $$('[data-gemini-settings]').forEach((button) => button.addEventListener("click", openGeminiSettings));
+    $("#geminiKeyForm")?.addEventListener("submit", saveGeminiKey);
+    $("#removeGeminiKey")?.addEventListener("click", removeGeminiKey);
+    $("#closeGeminiPanel")?.addEventListener("click", closeGeminiSettings);
     $$('[data-tutor-open]').forEach((button) => button.addEventListener("click", openTutor));
-    $("#closeTutor")?.addEventListener("click", closeTutor); $("#overlay")?.addEventListener("click", closeTutor);
+    $("#closeTutor")?.addEventListener("click", closeTutor); $("#overlay")?.addEventListener("click", () => { closeTutor(); closeGeminiSettings(); });
     $("#tutorForm")?.addEventListener("submit", (event) => { event.preventDefault(); const input = $("#tutorInput"); askTutor(input.value); input.value = ""; });
     $$("#tutorSuggestions button").forEach((button) => button.addEventListener("click", () => askTutor(button.textContent)));
-    $("#transcriptButton")?.addEventListener("click", () => $("#transcriptPanel")?.classList.remove("is-hidden")); $("#closeTranscript")?.addEventListener("click", () => $("#transcriptPanel")?.classList.add("is-hidden"));
-    $("#courseCreateForm")?.addEventListener("submit", createCourse); $("#newCourseFocus")?.addEventListener("click", () => $("#courseCreateForm input")?.focus());
+    $("#transcriptButton")?.addEventListener("click", () => { if (state.lesson?.transcript_access === false && state.course) return enrollCourse(state.course.id); $("#transcriptPanel")?.classList.remove("is-hidden"); $("#captionToggle")?.setAttribute("aria-pressed", "true"); $("#captionToggle")?.setAttribute("aria-label", "Hide transcript"); });
+    $("#closeTranscript")?.addEventListener("click", () => { $("#transcriptPanel")?.classList.add("is-hidden"); $("#captionToggle")?.setAttribute("aria-pressed", "false"); $("#captionToggle")?.setAttribute("aria-label", "Show transcript"); });
+    $("#captionToggle")?.addEventListener("click", () => { const panel = $("#transcriptPanel"); const open = panel?.classList.toggle("is-hidden") === false; $("#captionToggle").setAttribute("aria-pressed", String(open)); $("#captionToggle").setAttribute("aria-label", open ? "Hide transcript" : "Show transcript"); });
+    $("#speedToggle")?.addEventListener("click", cyclePlaybackSpeed);
+    $("#videoTimeline")?.addEventListener("click", seekLesson);
+    $("#videoTimeline")?.addEventListener("keydown", (event) => { if (event.key === "ArrowRight" || event.key === "ArrowUp") { event.preventDefault(); nudgeLessonPosition(1); } if (event.key === "ArrowLeft" || event.key === "ArrowDown") { event.preventDefault(); nudgeLessonPosition(-1); } });
+    $("#courseCreateForm")?.addEventListener("submit", createCourse);
+    $("#courseCreateForm")?.addEventListener("reset", () => window.setTimeout(syncMediaSourceControls, 0));
+    $("#newCourseFocus")?.addEventListener("click", () => $("#courseCreateForm [name='title']")?.focus());
+    $("#lessonVideoFile")?.addEventListener("change", () => { if ($("#lessonVideoFile").files?.[0]?.size) $("#lessonVideoUrl").value = ""; syncMediaSourceControls(); });
+    $("#lessonVideoUrl")?.addEventListener("input", () => { if ($("#lessonVideoUrl").value.trim()) $("#lessonVideoFile").value = ""; syncMediaSourceControls(); });
+    $$("input[name='transcriptionMode']").forEach((input) => input.addEventListener("change", syncMediaSourceControls));
+    $("#lessonTranscriptFile")?.addEventListener("change", () => { if ($("#lessonTranscriptFile").files?.[0]?.size) $("input[name='transcriptionMode'][value='upload']").checked = true; syncMediaSourceControls(); });
+    syncMediaSourceControls();
     $("#courseSearch")?.addEventListener("input", filterCourses); $$('input[name="topic"], input[name="level"], #courseSort').forEach((input) => input.addEventListener("change", filterCourses));
     $("#clearFilters")?.addEventListener("click", () => { $$('input[name="topic"], input[name="level"]').forEach((input) => { input.checked = input.value === "all"; }); $("#courseSearch").value = ""; filterCourses(); });
     $("#forgotPassword")?.addEventListener("click", () => toast("Password reset can be added when email delivery is configured."));
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeTutor(); closeGeminiSettings(); } });
   }
 
   async function boot() {
@@ -360,6 +847,7 @@
       if (state.token) state.user = (await api("/api/me")).user;
     } catch { localStorage.removeItem("learnwithai_token"); state.token = ""; }
     updateChrome();
+    await refreshGeminiStatus();
     try { await loadCourses(); } catch (error) { toast(error.message, "error"); }
     setView(state.user ? "dashboard" : "home", { scroll: false });
   }
