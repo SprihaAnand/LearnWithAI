@@ -207,6 +207,7 @@
                   <fieldset class="lesson-media-fieldset">
                     <legend>Lesson video <span>Choose one source</span></legend>
                     <label class="video-upload-dropzone" for="lessonVideoFile"><input id="lessonVideoFile" name="videoFile" type="file" accept="video/*" /><span class="upload-symbol" aria-hidden="true">↑</span><span><strong>Upload a video</strong><small id="videoFileName">MP4, WebM, or another browser-ready video</small></span></label>
+                    <p class="field-hint" id="uploadLimitsHint" aria-live="polite">Checking video and transcript upload limits…</p>
                     <p class="upload-or">or use a direct hosted file</p>
                     <label>Hosted direct video URL<input id="lessonVideoUrl" name="videoUrl" type="url" inputmode="url" placeholder="https://cdn.example.org/lesson.mp4" /><small class="field-hint">Use a direct HTTPS video file URL—not a watch page. Selecting a file clears this field.</small></label>
                     <p class="media-source-hint" id="mediaSourceHint" aria-live="polite">Upload a video to transcribe it locally with faster-whisper, or add a hosted video with your own transcript.</p>
@@ -252,6 +253,6 @@
 
     <template id="courseCardTemplate"><article class="course-card"><button class="course-visual" type="button"><span class="course-visual-pattern" aria-hidden="true"></span><span class="course-visual-icon" aria-hidden="true"></span><span class="course-badge"></span><span class="course-duration"></span><span class="course-play" aria-hidden="true">▶</span></button><div class="course-card-body"><p class="course-meta"></p><h3><button type="button" class="course-title-button"></button></h3><p class="course-description"></p><div class="course-card-footer"><div class="tiny-progress"><span></span></div><span class="course-progress-text"></span><button class="course-arrow" type="button" aria-label="Open course">→</button></div></div></article></template>
 
-    <script src="app.js?v=20260924-whisper"></script>
+    <script src="app.js?v=20260924-upload-limits"></script>
   </body>
 </html>

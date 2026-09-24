@@ -12,6 +12,7 @@
     quiz: null,
     playback: null,
     geminiConfigured: false,
+    uploadLimits: null,
   };
 
   const escapeHtml = (value = "") => String(value)
@@ -53,7 +54,9 @@
     try {
       response = await fetch(path, { ...options, headers });
     } catch {
-      throw new Error("Could not reach LearnWithAI. Check that the local server is running.");
+      throw new Error(multipart
+        ? "The video upload connection was interrupted. Your form is still here. Check your connection and whether the course was created before trying again."
+        : "Could not connect to LearnWithAI. Check your connection and try again.");
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.message || "Something went wrong. Please try again.");
@@ -67,6 +70,12 @@
     $$("[data-route]").forEach((element) => element.classList.toggle("active", element.dataset.route === name));
     $("#mainNav")?.classList.remove("is-open");
     $("#menuToggle")?.setAttribute("aria-expanded", "false");
+    if (name === "admin" && state.user?.role === "admin") {
+      refreshUploadLimits().catch(() => {
+        const hint = $("#uploadLimitsHint");
+        if (hint) hint.textContent = "Upload limits could not be loaded. We will check them again before publishing.";
+      });
+    }
   }
 
   function setAuthMode(mode = "login") {
@@ -638,7 +647,7 @@
   async function signOut() {
     try { if (state.token) await api("/api/session/gemini-key", { method: "DELETE" }); } catch { /* session expiry still clears the key */ }
     try { if (state.token) await api("/api/auth/logout", { method: "POST" }); } catch { /* local sign-out still succeeds */ }
-    window.clearInterval(state.playback); state.token = ""; state.user = null; state.course = null; state.lesson = null; state.geminiConfigured = false;
+    window.clearInterval(state.playback); state.token = ""; state.user = null; state.course = null; state.lesson = null; state.geminiConfigured = false; state.uploadLimits = null;
     localStorage.removeItem("learnwithai_token"); updateChrome(); await loadCourses(); setView("home"); toast("You’ve been signed out.");
   }
 
@@ -655,6 +664,31 @@
     return file instanceof File && file.size > 0 && /\.(txt|srt|vtt)$/i.test(file.name || "");
   }
 
+  const uploadLimitLabel = (bytes) => `${Number((bytes / (1024 * 1024)).toFixed(2))} MiB`;
+
+  function uploadSizeError(videoFile, transcriptFile) {
+    if (!state.uploadLimits) return "";
+    if (videoFile instanceof File && videoFile.size > state.uploadLimits.max_video_bytes) {
+      return `This video exceeds the ${uploadLimitLabel(state.uploadLimits.max_video_bytes)} upload limit. Choose a smaller file or use a hosted video URL.`;
+    }
+    if (transcriptFile instanceof File && transcriptFile.size > state.uploadLimits.max_transcript_bytes) {
+      return `This transcript exceeds the ${uploadLimitLabel(state.uploadLimits.max_transcript_bytes)} upload limit. Choose a smaller transcript file.`;
+    }
+    return "";
+  }
+
+  async function refreshUploadLimits() {
+    const limits = await api("/api/admin/upload-limits");
+    if (![limits.max_video_bytes, limits.max_transcript_bytes].every((value) => Number.isSafeInteger(value) && value > 0)) {
+      throw new Error("Could not check upload limits. Refresh the page and try again.");
+    }
+    state.uploadLimits = limits;
+    const hint = $("#uploadLimitsHint");
+    if (hint) hint.textContent = `Upload limits: ${uploadLimitLabel(limits.max_video_bytes)} per video and ${uploadLimitLabel(limits.max_transcript_bytes)} per transcript.`;
+    syncMediaSourceControls();
+    return limits;
+  }
+
   function transcriptTextFromFile(rawText) {
     return String(rawText || "")
       .replace(/^\uFEFF?WEBVTT[^\n]*\n?/i, "")
@@ -666,7 +700,6 @@
 
   async function readHostedTranscript(file) {
     if (!isTranscriptFile(file)) throw new Error("Choose a .txt, .srt, or .vtt transcript file.");
-    if (file.size > 5 * 1024 * 1024) throw new Error("Transcript files must be 5 MB or smaller.");
     const transcript = transcriptTextFromFile(await file.text());
     if (!transcript) throw new Error("That transcript file does not contain readable text.");
     if (transcript.length > 200000) throw new Error("The usable transcript must be 200,000 characters or fewer.");
@@ -707,6 +740,12 @@
       if (hostedUrl && !isHostedVideoUrl(hostedUrl)) throw new Error("Use a direct HTTPS URL for the hosted video.");
       if (transcriptMode === "auto" && !hasVideoFile) throw new Error("Local Whisper transcription needs a video file uploaded to LearnWithAI. For a hosted video, upload your transcript instead.");
       if (transcriptMode === "upload" && !isTranscriptFile(transcriptFile)) throw new Error("Choose a .txt, .srt, or .vtt transcript file.");
+      setPublishingState(true, "Checking upload limits…");
+      if (hasVideoFile || transcriptMode === "upload") {
+        await refreshUploadLimits();
+        const sizeError = uploadSizeError(videoFile, transcriptMode === "upload" ? transcriptFile : null);
+        if (sizeError) throw new Error(sizeError);
+      }
       const hostedTranscript = transcriptMode === "upload" && !hasVideoFile ? await readHostedTranscript(transcriptFile) : "";
       setPublishingState(true, hasVideoFile ? "Creating course and uploading video…" : "Creating course…");
       const { course } = await api("/api/admin/courses", { method: "POST", body: JSON.stringify(payload) });
@@ -771,6 +810,11 @@
     $("#transcriptFileName").textContent = fileLabel(transcriptInput.files?.[0], "Choose a text, SRT, or VTT file.");
     const hint = $("#mediaSourceHint");
     if (!hint) return;
+    const sizeError = uploadSizeError(videoFile, activeMode === "upload" ? transcriptInput.files?.[0] : null);
+    if (sizeError) {
+      hint.textContent = sizeError;
+      return;
+    }
     if (hasVideoFile) {
       hint.textContent = activeMode === "auto"
         ? "Your video will upload to LearnWithAI, then local faster-whisper will prepare its transcript. No Gemini API key is needed."

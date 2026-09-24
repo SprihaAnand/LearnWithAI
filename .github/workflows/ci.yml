@@ -37,3 +37,11 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: Set up Node.js for upload UI regression tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run upload UI regression tests
+        run: node --test tests/test_upload_ui.cjs

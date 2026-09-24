@@ -63,7 +63,7 @@ Copy the variable names from [`.env.example`](.env.example) into your deployment
 | `LEARNWITHAI_HOST` | Bind address. Defaults to `127.0.0.1`. |
 | `LEARNWITHAI_PORT` | HTTP port. Defaults to `8000`. |
 | `LEARNWITHAI_TOKEN_TTL_SECONDS` | Lifetime for authenticated sessions/tokens. |
-| `LEARNWITHAI_MAX_UPLOAD_BYTES` | Maximum complete multipart video request size (1–100 MiB; defaults to 100 MiB). The single-process server admits one upload at a time. |
+| `LEARNWITHAI_MAX_UPLOAD_BYTES` | Maximum video file size (1–100 MiB; defaults to 100 MiB). The multipart request also allows a transcript of up to 5 MiB and bounded form overhead. The single-process server admits one upload at a time. |
 | `LEARNWITHAI_COOKIE_SECURE` | Set to `1` behind HTTPS to mark private-video playback cookies as `Secure`. Keep `0` only for local HTTP development. |
 | `LEARNWITHAI_WHISPER_MODEL` | Local faster-whisper model name. Defaults to `base`; choose a supported model appropriate for your language coverage, latency, and RAM/GPU budget. |
 | `LEARNWITHAI_WHISPER_DEVICE` | Local transcription device: `cpu` (default), `auto`, or `cuda`. |
@@ -102,6 +102,13 @@ does not support an answer, it says so. A Gemini key never controls automatic
 transcription. See [the Gemini and video workflow](docs/GEMINI_VIDEO_WORKFLOW.md)
 for the detailed data flow and operating guidance.
 
+The course studio displays the server's video and transcript size limits and
+checks files before creating a course. If a video exceeds the limit, compress
+or split it, or use a hosted direct video URL with your own transcript.
+If an upload is interrupted, keep the selected file and check that the app is
+open at the Python server's address (by default `http://127.0.0.1:8000`), then
+retry. The server must stay running while you use the app.
+
 ## Quality checks
 
 Run the same checks used by continuous integration:
@@ -110,6 +117,7 @@ Run the same checks used by continuous integration:
 python -m pip install -r requirements.txt
 python -m compileall -q server.py tests
 python -m unittest discover -s tests -v
+node --test tests/test_upload_ui.cjs
 ```
 
 ## Security posture

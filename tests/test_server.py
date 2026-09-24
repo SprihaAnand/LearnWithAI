@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -156,6 +157,63 @@ class LearnWithAIServerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "1 MiB and 100 MiB"):
                 server.configured_upload_limit()
+
+    def test_admin_upload_limits_match_configured_server_limits(self) -> None:
+        status, _, _ = self.request("GET", "/api/admin/upload-limits")
+        self.assertEqual(status, 401)
+        status, _, _ = self.request("GET", "/api/admin/upload-limits", token=self.login())
+        self.assertEqual(status, 403)
+        admin_token = self.login("admin@learnwithai.demo")
+        with mock.patch.object(self.httpd.app, "max_upload_bytes", 2 * 1024 * 1024):
+            status, _, limits = self.request("GET", "/api/admin/upload-limits", token=admin_token)
+        self.assertEqual(status, 200)
+        self.assertEqual(limits, {"max_video_bytes": 2 * 1024 * 1024, "max_transcript_bytes": server.MAX_TRANSCRIPT_BYTES})
+
+    def test_oversized_upload_rejects_headers_and_closes_connection(self) -> None:
+        admin_token = self.login("admin@learnwithai.demo")
+        _, lesson = self.course_with_lesson(admin_token)
+        limit = self.httpd.app.max_upload_bytes + server.MAX_TRANSCRIPT_BYTES + 128 * 1024
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            # Reject before downloading a huge body, without reading its bytes
+            # as another request on an HTTP/1.1 persistent connection.
+            connection.putrequest("POST", f"/api/lessons/{lesson['id']}/video")
+            connection.putheader("Authorization", f"Bearer {admin_token}")
+            connection.putheader("Content-Type", "multipart/form-data; boundary=test")
+            connection.putheader("Content-Length", str(limit + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            self.assertEqual(response.status, 413)
+            self.assertEqual(response.getheader("Connection"), "close")
+            self.assertEqual(json.loads(response.read())["error"]["code"], "upload_too_large")
+        finally:
+            connection.close()
+        self.assertEqual(self.request("GET", "/api/health")[0], 200)
+        self.assertTrue(self.httpd.app.try_acquire_upload_slot())
+        self.httpd.app.release_upload_slot()
+
+    def test_interrupted_upload_does_not_save_partial_video(self) -> None:
+        admin_token = self.login("admin@learnwithai.demo")
+        _, lesson = self.course_with_lesson(admin_token)
+        content_type, body = self.multipart_body(
+            {"transcription_mode": "none"},
+            {"video": ("incomplete.mp4", "video/mp4", b"partial-video")},
+        )
+        stored_files = set(self.httpd.app.upload_root.iterdir())
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.putrequest("POST", f"/api/lessons/{lesson['id']}/video")
+            connection.putheader("Authorization", f"Bearer {admin_token}")
+            connection.putheader("Content-Type", content_type)
+            connection.putheader("Content-Length", str(len(body) + 100))
+            connection.endheaders(body)
+            connection.sock.shutdown(socket.SHUT_WR)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertEqual(json.loads(response.read())["error"]["code"], "incomplete_upload")
+        finally:
+            connection.close()
+        self.assertEqual(set(self.httpd.app.upload_root.iterdir()), stored_files)
 
     def test_registration_login_me_and_logout(self) -> None:
         email = "new.learner@example.org"

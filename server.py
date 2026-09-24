@@ -1662,7 +1662,14 @@ class LearnWithAIHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _error(self, error: APIError) -> None:
-        self._send_json(error.status, {"error": {"code": error.code, "message": error.message}})
+        # A rejected upload may still have an unread request body. Never reuse
+        # that socket and interpret video bytes as another HTTP request.
+        self.close_connection = True
+        self._send_json(
+            error.status,
+            {"error": {"code": error.code, "message": error.message}},
+            {"Connection": "close"},
+        )
 
     def _read_json(self) -> dict[str, Any]:
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
@@ -1700,6 +1707,8 @@ class LearnWithAIHandler(BaseHTTPRequestHandler):
         if length > body_limit:
             raise APIError(413, "upload_too_large", "The upload exceeds the configured size limit.")
         raw = self.rfile.read(length)
+        if len(raw) != length:
+            raise APIError(400, "incomplete_upload", "The upload was interrupted. Please upload the complete file again.")
         try:
             message = BytesParser(policy=policy.default).parsebytes(
                 ("Content-Type: " + content_type + "\r\nMIME-Version: 1.0\r\n\r\n").encode("utf-8") + raw
@@ -1838,6 +1847,14 @@ class LearnWithAIHandler(BaseHTTPRequestHandler):
         if parts == ["api", "courses"] and method == "POST":
             user = self._user()
             self._send_json(201, {"course": self.app.create_course(user, self._read_json())})
+            return
+        if parts == ["api", "admin", "upload-limits"] and method in ("GET", "HEAD"):
+            user = self._user()
+            self.app.require_admin(user)
+            self._send_json(200, {
+                "max_video_bytes": self.app.max_upload_bytes,
+                "max_transcript_bytes": MAX_TRANSCRIPT_BYTES,
+            })
             return
         if parts == ["api", "admin", "courses"] and method in ("GET", "HEAD"):
             user = self._user()
