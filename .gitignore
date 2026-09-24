@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local application data and secrets
+data/
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.DS_Store
+Thumbs.db
+.vscode/
+*.code-workspace
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+coverage.xml

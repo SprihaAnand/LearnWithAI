@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="LearnWithAI is an inclusive learning space for community-led learning." />
+    <meta name="theme-color" content="#0e4a45" />
+    <title>LearnWithAI | Learning that reaches further</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="page-wash" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#home" data-route="home" aria-label="LearnWithAI home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img"><path d="M8 8h10c4 0 7 3 7 7v17H15c-4 0-7-3-7-7V8Z" fill="currentColor"/><path d="M32 8H22c-4 0-7 3-7 7v17h10c4 0 7-3 7-7V8Z" fill="currentColor" opacity=".58"/><path d="M20 14v18" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <span>Learn<span>WithAI</span></span>
+      </a>
+
+      <button class="menu-toggle" id="menuToggle" type="button" aria-expanded="false" aria-controls="mainNav">
+        <span></span><span></span><span></span><span class="sr-only">Open navigation</span>
+      </button>
+
+      <nav class="main-nav" id="mainNav" aria-label="Main navigation">
+        <a href="#home" data-route="home">Home</a>
+        <a href="#library" data-route="library">Explore learning</a>
+        <a href="#impact" data-route="impact">Our impact</a>
+        <a class="member-link is-hidden" href="#dashboard" data-route="dashboard">My learning</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="text-button auth-entry" type="button" data-auth-mode="login">Sign in</button>
+        <button class="button button-small auth-entry" type="button" data-auth-mode="register">Get started <span aria-hidden="true">→</span></button>
+        <button class="profile-button is-hidden" id="profileButton" type="button" aria-expanded="false" aria-controls="profileMenu">
+          <span class="avatar" id="headerAvatar">A</span>
+          <span class="profile-name" id="headerName">Asha</span>
+          <span aria-hidden="true">⌄</span>
+        </button>
+        <div class="profile-menu is-hidden" id="profileMenu" role="menu">
+          <button type="button" role="menuitem" data-route="dashboard">My learning</button>
+          <button class="admin-only" type="button" role="menuitem" data-route="admin">Admin studio</button>
+          <button type="button" role="menuitem" id="signOutButton">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="view home-view" data-view="home" aria-labelledby="home-title">
+        <div class="hero-shell">
+          <div class="hero-copy reveal">
+            <p class="eyebrow"><span class="eyebrow-dot"></span> Community-led learning</p>
+            <h1 id="home-title">Knowledge is more powerful when it <em>reaches everyone.</em></h1>
+            <p class="hero-text">Practical, welcoming courses that help people build skills, confidence, and new possibilities—wherever they begin.</p>
+            <div class="hero-actions">
+              <button class="button" type="button" data-route="library">Explore courses <span aria-hidden="true">→</span></button>
+              <button class="button button-quiet" type="button" data-auth-mode="register">Join LearnWithAI</button>
+            </div>
+            <div class="learner-proof" aria-label="Community stats">
+              <div class="proof-avatars" aria-hidden="true"><span>R</span><span>M</span><span>J</span><span>K</span></div>
+              <p><strong>4,800+ learners</strong><br />growing together this year</p>
+            </div>
+          </div>
+          <div class="hero-art reveal" aria-label="Illustration of learning community">
+            <div class="hero-orbit orbit-one"></div>
+            <div class="hero-orbit orbit-two"></div>
+            <div class="hero-card hero-card-main">
+              <div class="mini-video"><span class="play-icon" aria-hidden="true">▶</span><span>Lesson 04 · 08:36</span></div>
+              <p class="tiny-label">DIGITAL FOUNDATIONS</p>
+              <h2>Spot misinformation<br />with confidence</h2>
+              <div class="card-progress"><span style="width: 68%"></span></div>
+              <p class="card-progress-label">68% complete</p>
+            </div>
+            <div class="hero-card hero-card-note"><span aria-hidden="true">✦</span><p>Small lessons.<br /><strong>Real change.</strong></p></div>
+            <div class="hero-person person-one" aria-hidden="true"><span></span></div>
+            <div class="hero-person person-two" aria-hidden="true"><span></span></div>
+            <div class="hero-spark spark-one" aria-hidden="true">✦</div>
+            <div class="hero-spark spark-two" aria-hidden="true">✦</div>
+          </div>
+        </div>
+
+        <section class="trusted-strip" aria-label="Learning approach">
+          <p>Made for people, not just screens</p>
+          <span>Short lessons</span><i aria-hidden="true"></i><span>Low-bandwidth friendly</span><i aria-hidden="true"></i><span>Learn at your pace</span><i aria-hidden="true"></i><span>Built with communities</span>
+        </section>
+
+        <section class="section feature-section" aria-labelledby="start-title">
+          <div class="section-heading split-heading">
+            <div><p class="eyebrow">A place to begin</p><h2 id="start-title">Learning that feels possible</h2></div>
+            <p>Every course is designed to be useful right away: clear language, short videos, reflection, and a helping hand when you need it.</p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card feature-mint"><div class="feature-icon">◒</div><h3>Made for real life</h3><p>Save your place and learn in the moments you have, on any device.</p></article>
+            <article class="feature-card feature-sun"><div class="feature-icon">✦</div><h3>Guidance when it matters</h3><p>Ask the learning assistant to explain an idea in a way that makes sense to you.</p></article>
+            <article class="feature-card feature-lilac"><div class="feature-icon">⌁</div><h3>Grow together</h3><p>Build skills that strengthen your household, workplace, and community.</p></article>
+          </div>
+        </section>
+
+        <section class="section course-preview" aria-labelledby="preview-title">
+          <div class="section-heading inline-heading"><div><p class="eyebrow">Popular right now</p><h2 id="preview-title">Find your next step</h2></div><button class="link-button" type="button" data-route="library">View all learning <span aria-hidden="true">→</span></button></div>
+          <div class="course-grid" id="homeCourseGrid" aria-live="polite"></div>
+        </section>
+
+        <section class="impact-banner" id="impact" aria-labelledby="impact-title">
+          <div><p class="eyebrow">Our shared impact</p><h2 id="impact-title">When one learner grows, a whole community can move forward.</h2></div>
+          <div class="impact-stats"><p><strong>81%</strong><span>say they use a new skill each week</span></p><p><strong>34</strong><span>community partners co-creating learning</span></p><p><strong>14</strong><span>languages supported by facilitators</span></p></div>
+        </section>
+
+        <section class="cta-panel"><div><p class="eyebrow">Your learning, your pace</p><h2>A good place to start is right here.</h2><p>Join a community of people making room for what comes next.</p></div><button class="button button-light" type="button" data-auth-mode="register">Create a free account <span aria-hidden="true">→</span></button></section>
+      </section>
+
+      <section class="view auth-view is-hidden" data-view="auth" aria-labelledby="auth-title">
+        <div class="auth-layout">
+          <aside class="auth-story">
+            <a class="brand brand-on-dark" href="#home" data-route="home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M8 8h10c4 0 7 3 7 7v17H15c-4 0-7-3-7-7V8Z" fill="currentColor"/><path d="M32 8H22c-4 0-7 3-7 7v17h10c4 0 7-3 7-7V8Z" fill="currentColor" opacity=".58"/><path d="M20 14v18" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></span><span>Learn<span>WithAI</span></span></a>
+            <div class="auth-quote"><span class="quote-mark">“</span><blockquote>Learning here helps me turn curiosity into action—one lesson at a time.</blockquote><p><strong>Radhika</strong> · Community learner</p></div>
+            <div class="auth-shape auth-shape-one" aria-hidden="true"></div><div class="auth-shape auth-shape-two" aria-hidden="true"></div>
+          </aside>
+          <div class="auth-panel">
+            <div class="auth-switch" role="tablist" aria-label="Account actions"><button id="loginTab" type="button" role="tab" aria-selected="true" data-auth-mode="login">Sign in</button><button id="registerTab" type="button" role="tab" aria-selected="false" data-auth-mode="register">Create account</button></div>
+            <div class="auth-form-wrap" id="loginFormWrap">
+              <p class="eyebrow">Welcome back</p><h1 id="auth-title">Pick up where you left off.</h1><p class="auth-subtitle">Your next small step is ready when you are.</p>
+              <form id="loginForm" novalidate>
+                <label>Email address<input name="email" type="email" autocomplete="email" placeholder="you@example.org" required /></label>
+                <label>Password<div class="password-field"><input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required /><button class="password-toggle" type="button" aria-label="Show password">Show</button></div></label>
+                <div class="form-row"><label class="check-label"><input type="checkbox" name="remember" checked /> <span>Keep me signed in</span></label><button class="inline-button" type="button" id="forgotPassword">Forgot password?</button></div>
+                <button class="button button-full" type="submit">Sign in <span aria-hidden="true">→</span></button>
+              </form>
+              <div class="auth-divider"><span>or explore a demo</span></div>
+              <div class="demo-buttons"><button class="button button-outline" type="button" data-demo="learner">Try learner demo</button><button class="button button-outline" type="button" data-demo="admin">Try admin demo</button></div>
+              <p class="auth-footnote">New to LearnWithAI? <button class="inline-button" type="button" data-auth-mode="register">Create your free account</button></p>
+            </div>
+            <div class="auth-form-wrap is-hidden" id="registerFormWrap">
+              <p class="eyebrow">Welcome to LearnWithAI</p><h1>Create space for what’s next.</h1><p class="auth-subtitle">Free, practical learning designed with communities.</p>
+              <form id="registerForm" novalidate>
+                <label>Your name<input name="name" type="text" autocomplete="name" placeholder="How should we call you?" minlength="2" required /></label>
+                <label>Email address<input name="email" type="email" autocomplete="email" placeholder="you@example.org" required /></label>
+                <label>Password<div class="password-field"><input name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" minlength="8" required /><button class="password-toggle" type="button" aria-label="Show password">Show</button></div></label>
+                <label>I’m here as<select name="intent"><option value="learner">A learner</option><option value="facilitator">A community facilitator</option><option value="partner">A partner organisation</option></select></label>
+                <label class="check-label"><input type="checkbox" name="terms" required /> <span>I agree to the community guidelines and privacy promise.</span></label>
+                <button class="button button-full" type="submit">Create my account <span aria-hidden="true">→</span></button>
+              </form>
+              <p class="auth-footnote">Already have an account? <button class="inline-button" type="button" data-auth-mode="login">Sign in</button></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view app-view is-hidden" data-view="dashboard" aria-labelledby="dashboard-title">
+        <div class="app-shell">
+          <aside class="side-nav" aria-label="Learning navigation">
+            <div class="side-nav-label">LEARNER SPACE</div>
+            <button class="side-nav-item active" type="button" data-route="dashboard"><span aria-hidden="true">⌂</span> Overview</button>
+            <button class="side-nav-item" type="button" data-route="library"><span aria-hidden="true">◫</span> Course library</button>
+            <button class="side-nav-item" type="button" data-route="dashboard" data-dashboard-section="progress"><span aria-hidden="true">↗</span> My progress</button>
+            <button class="side-nav-item" type="button" data-tutor-open><span aria-hidden="true">✦</span> Learning assistant</button>
+            <div class="side-nav-divider"></div>
+            <button class="side-nav-item admin-only" type="button" data-route="admin"><span aria-hidden="true">▧</span> Admin studio</button>
+            <button class="side-nav-item" type="button" id="sideSignOut"><span aria-hidden="true">⇥</span> Sign out</button>
+            <div class="side-help"><span aria-hidden="true">?</span><div><strong>Need a hand?</strong><p>Our learning team is here for you.</p><button type="button" data-tutor-open>Ask a question →</button></div></div>
+          </aside>
+          <div class="app-content">
+            <div class="app-greeting"><div><p class="eyebrow" id="dashboardDate">TUESDAY, 24 SEPTEMBER</p><h1 id="dashboard-title">Good morning, <span id="dashboardName">Asha</span>.</h1><p>Here’s a little of what you can make time for today.</p></div><button class="notification-button" type="button" aria-label="Notifications"><span aria-hidden="true">♢</span><b></b></button></div>
+            <section class="continue-card" id="continueCard" aria-label="Continue learning"></section>
+            <section class="dashboard-section"><div class="dashboard-heading"><div><p class="eyebrow">Your learning</p><h2>Keep your momentum</h2></div><button class="link-button" type="button" data-route="library">Browse all courses <span aria-hidden="true">→</span></button></div><div class="course-grid dashboard-courses" id="dashboardCourseGrid"></div></section>
+            <section class="progress-section" id="progressSection"><div class="dashboard-heading"><div><p class="eyebrow">Small wins add up</p><h2>Your progress</h2></div></div><div class="stat-grid"><article class="stat-card"><span class="stat-icon icon-mint" aria-hidden="true">◔</span><p>Learning time</p><strong id="learningMinutes">2h 15m</strong><small>This month</small></article><article class="stat-card"><span class="stat-icon icon-sun" aria-hidden="true">✓</span><p>Lessons completed</p><strong id="lessonCount">7</strong><small>Across 3 courses</small></article><article class="stat-card"><span class="stat-icon icon-lilac" aria-hidden="true">✦</span><p>Learning streak</p><strong id="streakCount">4 days</strong><small>Keep it going!</small></article></div></section>
+          </div>
+        </div>
+      </section>
+
+      <section class="view library-view is-hidden" data-view="library" aria-labelledby="library-title">
+        <div class="library-hero"><div><p class="eyebrow">LEARNING LIBRARY</p><h1 id="library-title">Discover what moves you forward.</h1><p>Short, practical courses created with people who understand the work of everyday life.</p></div><div class="library-search"><label class="sr-only" for="courseSearch">Search courses</label><span aria-hidden="true">⌕</span><input id="courseSearch" type="search" placeholder="What would you like to learn?" /></div></div>
+        <div class="library-layout"><aside class="filter-panel"><div class="filter-mobile-head"><strong>Filter courses</strong><button type="button" id="clearFilters">Clear all</button></div><fieldset><legend>Topics</legend><label><input type="checkbox" name="topic" value="all" checked /> All topics <span id="courseTotal">6</span></label><label><input type="checkbox" name="topic" value="digital" /> Digital skills <span>2</span></label><label><input type="checkbox" name="topic" value="livelihoods" /> Livelihoods <span>2</span></label><label><input type="checkbox" name="topic" value="health" /> Health &amp; wellbeing <span>1</span></label><label><input type="checkbox" name="topic" value="community" /> Community leadership <span>1</span></label></fieldset><fieldset><legend>Level</legend><label><input type="checkbox" name="level" value="beginner" /> Beginner-friendly</label><label><input type="checkbox" name="level" value="intermediate" /> Build on basics</label></fieldset><div class="filter-note"><span aria-hidden="true">◌</span><p><strong>Learn your way</strong>Captions, transcripts, and save-for-later are available in every course.</p></div></aside><div class="library-results"><div class="results-top"><p><strong id="resultCount">6</strong> courses to explore</p><label>Sort by <select id="courseSort"><option value="popular">Most popular</option><option value="newest">Newest</option><option value="shortest">Shortest first</option></select></label></div><div class="course-grid library-course-grid" id="libraryCourseGrid" aria-live="polite"></div><p class="empty-state is-hidden" id="emptyCourses">No courses match that yet. Try a different search or filter.</p></div></div>
+      </section>
+
+      <section class="view course-view is-hidden" data-view="course" aria-labelledby="course-title">
+        <div class="course-topbar"><button class="back-button" type="button" data-route="dashboard"><span aria-hidden="true">←</span> Back to my learning</button><button class="save-button" type="button" id="saveCourseButton"><span aria-hidden="true">♡</span> Save for later</button></div>
+        <div class="course-layout"><div class="lesson-main"><div class="course-breadcrumb" id="courseBreadcrumb">DIGITAL FOUNDATIONS · MODULE 2 OF 3</div><h1 id="course-title">Learn with confidence</h1><p class="lesson-title" id="lessonTitle">Finding trustworthy information online</p><div class="video-frame" id="videoFrame"><div class="video-decor video-decor-one" aria-hidden="true"></div><div class="video-decor video-decor-two" aria-hidden="true"></div><div class="video-center"><button class="large-play" id="playLessonButton" type="button" aria-label="Play lesson"><span aria-hidden="true">▶</span></button><p id="videoStatus">Ready when you are</p></div><div class="video-caption"><span class="video-avatar" aria-hidden="true">N</span><div><strong id="videoTeacher">Nandita Sharma</strong><p>Community learning facilitator</p></div></div><div class="video-controls"><button type="button" id="videoPlayControl" aria-label="Play lesson">▶</button><div class="timeline" id="videoTimeline" role="slider" aria-label="Lesson playback progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><span id="timelineFill"></span></div><span id="videoTime">00:00 / 08:36</span><button type="button" id="captionToggle" aria-pressed="true">CC</button><button type="button" id="speedToggle">1×</button></div></div><div class="lesson-body"><div class="lesson-copy"><p class="eyebrow">IN THIS LESSON</p><h2 id="lessonHeading">Learn how to pause, check, and choose information you can trust.</h2><p id="lessonDescription">We’ll look at a simple way to notice misleading posts before they travel further. You don’t need to know everything—you just need a few good questions.</p></div><div class="lesson-actions"><button class="button button-outline" type="button" id="transcriptButton"><span aria-hidden="true">▤</span> Read transcript</button><button class="button" type="button" id="completeLessonButton">Mark lesson complete <span aria-hidden="true">✓</span></button></div></div><div class="transcript-panel is-hidden" id="transcriptPanel" aria-live="polite"><div><p class="eyebrow">TRANSCRIPT</p><p id="transcriptText">Welcome. In this lesson we will explore a simple way to check information before sharing it...</p></div><button class="icon-close" type="button" id="closeTranscript" aria-label="Close transcript">×</button></div><section class="lesson-quiz" id="lessonQuiz" aria-labelledby="quiz-title"><div class="quiz-intro"><p class="eyebrow">CHECK YOUR UNDERSTANDING</p><h2 id="quiz-title">A quick reflection</h2><p>Take a minute to turn this lesson into something you can use.</p></div><form id="quizForm"></form><div class="quiz-feedback is-hidden" id="quizFeedback" aria-live="polite"></div></section></div><aside class="lesson-sidebar"><div class="course-summary"><span class="course-chip" id="courseChip">DIGITAL SKILLS</span><h2 id="courseSideTitle">Digital foundations</h2><div class="course-overall"><span id="courseOverallText">2 of 5 lessons</span><div class="progress-track"><span id="courseOverallBar" style="width:40%"></span></div><strong id="courseOverallPercent">40%</strong></div></div><div class="lesson-list" id="lessonList"></div><button class="tutor-card" type="button" data-tutor-open><span class="tutor-card-icon" aria-hidden="true">✦</span><span><strong>Need help with this lesson?</strong><small>Ask the learning assistant</small></span><b aria-hidden="true">→</b></button></aside></div>
+      </section>
+
+      <section class="view app-view admin-view is-hidden" data-view="admin" aria-labelledby="admin-title">
+        <div class="app-shell"><aside class="side-nav admin-side"><div class="side-nav-label">ADMIN STUDIO</div><button class="side-nav-item" type="button" data-route="dashboard"><span aria-hidden="true">⌂</span> Learner view</button><button class="side-nav-item active" type="button" data-route="admin"><span aria-hidden="true">▧</span> Course studio</button><button class="side-nav-item" type="button" data-route="library"><span aria-hidden="true">◫</span> Course library</button><div class="side-nav-divider"></div><button class="side-nav-item" type="button" id="adminSignOut"><span aria-hidden="true">⇥</span> Sign out</button></aside><div class="app-content admin-content"><div class="admin-heading"><div><p class="eyebrow">CONTENT MANAGEMENT</p><h1 id="admin-title">Course studio</h1><p>Create useful, welcoming learning experiences for your community.</p></div><button class="button" type="button" id="newCourseFocus">+ Create a course</button></div><section class="admin-metrics"><article><span>LIVE COURSES</span><strong id="adminCourseCount">6</strong><small>Available to learners</small></article><article><span>ACTIVE LEARNERS</span><strong>4,862</strong><small>Across 34 partner communities</small></article><article><span>AVERAGE COMPLETION</span><strong>72%</strong><small>Up 6% this month</small></article></section><div class="admin-grid"><section class="admin-form-card" aria-labelledby="create-course-title"><div class="card-title"><div><p class="eyebrow">NEW LEARNING PATH</p><h2 id="create-course-title">Create a course</h2></div><span class="draft-pill">Draft</span></div><form id="courseCreateForm" novalidate><div class="form-grid"><label>Course title<input name="title" type="text" placeholder="e.g. Starting a small enterprise" minlength="4" required /></label><label>Topic<select name="topic" required><option value="digital">Digital skills</option><option value="livelihoods">Livelihoods</option><option value="health">Health &amp; wellbeing</option><option value="community">Community leadership</option></select></label></div><label>What will learners gain?<textarea name="description" rows="3" maxlength="280" placeholder="Describe the practical outcome of this course." required></textarea><small class="field-hint">Keep it clear, practical, and encouraging.</small></label><div class="form-grid"><label>Level<select name="level"><option value="beginner">Beginner-friendly</option><option value="intermediate">Build on basics</option></select></label><label>Estimated time<input name="duration" type="text" placeholder="e.g. 45 min" required /></label></div><label>First lesson title<input name="firstLesson" type="text" placeholder="e.g. A welcoming first step" required /></label><label>Hosted video URL<input name="videoUrl" type="url" placeholder="https://video-provider.example/lesson" /><small class="field-hint">Paste a secure URL from your approved video host. Leave blank while drafting.</small></label><div class="form-actions"><span class="save-status" id="courseSaveStatus" aria-live="polite"></span><button class="button button-outline" type="reset">Clear</button><button class="button" type="submit">Publish course <span aria-hidden="true">→</span></button></div></form></section><section class="admin-course-list" aria-labelledby="published-title"><div class="card-title"><div><p class="eyebrow">YOUR LIBRARY</p><h2 id="published-title">Published courses</h2></div><button class="link-button" type="button" data-route="library">View all →</button></div><div id="adminCourseList"></div></section></div></div></div>
+      </section>
+    </main>
+
+    <aside class="tutor-panel" id="tutorPanel" aria-labelledby="tutorTitle" aria-hidden="true">
+      <div class="tutor-head"><div><span class="tutor-orb" aria-hidden="true">✦</span><div><p class="eyebrow">LEARNWITHAI ASSISTANT</p><h2 id="tutorTitle">Let’s work it out.</h2></div></div><button class="icon-close" type="button" id="closeTutor" aria-label="Close learning assistant">×</button></div>
+      <div class="tutor-context" id="tutorContext"><span aria-hidden="true">◒</span><p>Ask about this lesson, or anything you are learning.</p></div>
+      <div class="tutor-messages" id="tutorMessages" aria-live="polite"><div class="message message-bot"><span class="message-mark" aria-hidden="true">✦</span><p>Hi! I’m here to help you think through your learning. What would you like to explore?</p></div></div>
+      <div class="tutor-suggestions" id="tutorSuggestions"><button type="button">Explain this simply</button><button type="button">Give me an example</button><button type="button">Help me reflect</button></div>
+      <form class="tutor-input" id="tutorForm"><label class="sr-only" for="tutorInput">Ask the learning assistant</label><textarea id="tutorInput" rows="1" placeholder="Ask a question…" maxlength="1000"></textarea><button type="submit" aria-label="Send question"><span aria-hidden="true">↑</span></button></form>
+      <p class="tutor-disclaimer">The assistant offers learning support, not professional advice. Check important information with a trusted local source.</p>
+    </aside>
+    <button class="tutor-fab" id="tutorFab" type="button" data-tutor-open aria-label="Open learning assistant"><span aria-hidden="true">✦</span><span>Ask for help</span></button>
+    <div class="overlay" id="overlay" aria-hidden="true"></div>
+    <div class="toast-region" id="toastRegion" role="status" aria-live="polite"></div>
+
+    <template id="courseCardTemplate"><article class="course-card"><button class="course-visual" type="button"><span class="course-visual-pattern" aria-hidden="true"></span><span class="course-visual-icon" aria-hidden="true"></span><span class="course-badge"></span><span class="course-duration"></span><span class="course-play" aria-hidden="true">▶</span></button><div class="course-card-body"><p class="course-meta"></p><h3><button type="button" class="course-title-button"></button></h3><p class="course-description"></p><div class="course-card-footer"><div class="tiny-progress"><span></span></div><span class="course-progress-text"></span><button class="course-arrow" type="button" aria-label="Open course">→</button></div></div></article></template>
+
+    <script src="app.js?v=20260924"></script>
+  </body>
+</html>
